@@ -236,7 +236,8 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
 
     initialized_variable_names = {}
     scaffold_fn = None
-    if init_checkpoint:
+    if is_training and init_checkpoint and (hvd == None or hvd.rank() == 0):
+      tf.logging.info("**** Init Checkpoint {} {} ****".format(hvd.rank(), init_checkpoint))
       (assignment_map, initialized_variable_names
       ) = modeling.get_assignment_map_from_checkpoint(tvars, init_checkpoint)
       if use_tpu:
@@ -504,6 +505,7 @@ def main(_):
     hvd.init()
     # [HVD] Use different output directories for different GPU's. 
     FLAGS.output_dir = FLAGS.output_dir if hvd.rank() == 0 else os.path.join(FLAGS.output_dir, str(hvd.rank()))
+    FLAGS.save_checkpoints_steps = FLAGS.save_checkpoints_steps if hvd.rank() == 0 else None
     # [HVD] The training_steps for each GPU is the total steps divided by the number of GPU's.
     FLAGS.num_train_steps = FLAGS.num_train_steps // hvd.size()
     FLAGS.num_warmup_steps = FLAGS.num_warmup_steps // hvd.size()
