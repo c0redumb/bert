@@ -48,6 +48,7 @@ for CONFIG in $CONFIGS; do
   echo "Model        : $MODEL"           > $CUR_TRAIN_DIR/run_record.txt
   echo "Test         : $TEST"           >> $CUR_TRAIN_DIR/run_record.txt
   echo "Seq/Batch    : $SEQ/$BATCH"     >> $CUR_TRAIN_DIR/run_record.txt
+  echo "Learn Rate   : $LRN_RT"         >> $CUR_TRAIN_DIR/run_record.txt
   echo "Max Pred     : $MAX_PRED"       >> $CUR_TRAIN_DIR/run_record.txt
   echo "Steps/Warmup : $STEPS/$WARMUP"  >> $CUR_TRAIN_DIR/run_record.txt
   echo "Init Ckpt    : $LAST_CKPT"      >> $CUR_TRAIN_DIR/run_record.txt

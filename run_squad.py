@@ -31,8 +31,13 @@ import tensorflow as tf
 tf.compat.v1.disable_resource_variables()
 tf.compat.v1.disable_eager_execution()
 
-flags = tf.compat.v1.flags
+# Add Horovod to run_squad
+try:
+  import horovod.tensorflow as hvd
+except:
+  hvd = None
 
+flags = tf.compat.v1.flags
 FLAGS = flags.FLAGS
 
 ## Required parameters
@@ -155,6 +160,7 @@ flags.DEFINE_float(
     "null_score_diff_threshold", 0.0,
     "If null_score - best_non_null is greater than the threshold predict null.")
 
+flags.DEFINE_bool("use_horovod", False, "Whether to use Horovod.")
 
 flags.DEFINE_bool("enable_timeline", False,
                   "Whether to enable generation of profiling data.")
@@ -599,7 +605,7 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
 
 def model_fn_builder(bert_config, init_checkpoint, learning_rate,
                      num_train_steps, num_warmup_steps, use_tpu,
-                     use_one_hot_embeddings):
+                     use_one_hot_embeddings, use_hvd):
   """Returns `model_fn` closure for TPUEstimator."""
 
   def model_fn(features, labels, mode, params):  # pylint: disable=unused-argument
@@ -670,7 +676,7 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
       total_loss = (start_loss + end_loss) / 2.0
 
       train_op = optimization.create_optimizer(
-          total_loss, learning_rate, num_train_steps, num_warmup_steps, use_tpu)
+          total_loss, learning_rate, num_train_steps, num_warmup_steps, use_tpu, use_hvd)
 
       output_spec = tf.compat.v1.estimator.tpu.TPUEstimatorSpec(
           mode=mode,
@@ -1136,6 +1142,18 @@ def validate_flags_or_throw(bert_config):
 def main(_):
   tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.INFO)
 
+  use_hvd = False
+  if FLAGS.use_horovod and hvd != None:
+    use_hvd = True
+    tf.logging.info("Horovod enabled and used")
+
+  if use_hvd:
+    # [HVD] Initialize the library: basic bookkeeping, sets up communication between GPUs, allocates buffers etc.
+    hvd.init()
+    # [HVD] Use different output directories for different GPU's. 
+    FLAGS.output_dir = FLAGS.output_dir if hvd.rank() == 0 else os.path.join(FLAGS.output_dir, str(hvd.rank()))
+    FLAGS.save_checkpoints_steps = FLAGS.save_checkpoints_steps if hvd.rank() == 0 else None
+
   bert_config = modeling.BertConfig.from_json_file(FLAGS.bert_config_file)
 
   validate_flags_or_throw(bert_config)
@@ -1151,6 +1169,13 @@ def main(_):
         FLAGS.tpu_name, zone=FLAGS.tpu_zone, project=FLAGS.gcp_project)
 
   is_per_host = tf.compat.v1.estimator.tpu.InputPipelineConfig.PER_HOST_V2
+
+  config = None
+  if use_hvd:
+    # [HVD] Pin each worker to a GPU (make sure one worker uses only one GPU).
+    config = tf.ConfigProto()
+    config.gpu_options.visible_device_list = str(hvd.local_rank())
+
   run_config = tf.compat.v1.estimator.tpu.RunConfig(
       cluster=tpu_cluster_resolver,
       master=FLAGS.master,
@@ -1159,7 +1184,9 @@ def main(_):
       tpu_config=tf.compat.v1.estimator.tpu.TPUConfig(
           iterations_per_loop=FLAGS.iterations_per_loop,
           num_shards=FLAGS.num_tpu_cores,
-          per_host_input_for_training=is_per_host))
+          per_host_input_for_training=is_per_host),
+      log_step_count_steps=100,
+      session_config=config)
 
   train_examples = None
   num_train_steps = None
@@ -1170,6 +1197,11 @@ def main(_):
     num_train_steps = int(
         len(train_examples) / FLAGS.train_batch_size * FLAGS.num_train_epochs)
     num_warmup_steps = int(num_train_steps * FLAGS.warmup_proportion)
+
+    if use_hvd:
+      # [HVD] The training_steps for each GPU is the total steps divided by the number of GPU's.
+      num_train_steps = num_train_steps // hvd.size()
+      num_warmup_steps = num_warmup_steps // hvd.size()
 
     # Pre-shuffle the input to avoid having to make a very large shuffle
     # buffer in in the `input_fn`.
@@ -1183,7 +1215,8 @@ def main(_):
       num_train_steps=num_train_steps,
       num_warmup_steps=num_warmup_steps,
       use_tpu=FLAGS.use_tpu,
-      use_one_hot_embeddings=FLAGS.use_tpu)
+      use_one_hot_embeddings=FLAGS.use_tpu,
+      use_hvd=use_hvd)
 
   # If TPU is not available, this will fall back to normal Estimator on CPU
   # or GPU.
@@ -1230,6 +1263,9 @@ def main(_):
         output_dir=FLAGS.output_dir)
       hooks.append(profiler_hook)
 
+    if use_hvd:
+      # [HVD] Ensure all GPU's start with the same weights.
+      hooks.append(hvd.BroadcastGlobalVariablesHook(0))
     estimator.train(input_fn=train_input_fn, max_steps=num_train_steps, hooks=hooks)
 
   if FLAGS.do_predict:

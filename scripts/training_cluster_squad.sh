@@ -43,82 +43,44 @@ rm -rf $SQUAD_DIR
 mkdir -p $SQUAD_DIR
 
 find_last_stage $TRAIN_DIR
-echo Last stage of pretraining is at $LAST_STAGE > $SQUAD_DIR/run_output.txt
+#echo Last stage of pretraining is at $LAST_STAGE > $SQUAD_DIR/run_output.txt
 
-exit 0
+echo "Model        : $MODEL"                     > $SQUAD_DIR/run_record.txt
+echo "Epoch/Batch  : $SQUAD_EPOCH/$SQUAD_BATCH" >> $SQUAD_DIR/run_record.txt
+echo "Seq/Stride   : $SQUAD_SEQ/$SQUAD_STRIDE"  >> $SQUAD_DIR/run_record.txt
+echo "Warmup       : $SQUAD_WARMUP"             >> $SQUAD_DIR/run_record.txt
+echo "Learn Rate   : $SQUAD_LN_RATE"            >> $SQUAD_DIR/run_record.txt
+echo "Init Ckpt    : $LAST_STAGE"               >> $SQUAD_DIR/run_record.txt
+echo "STARTED on " $(date)                      >> $SQUAD_DIR/run_record.txt
 
-# Iterate through configs (Sequence Length, Batch)
-STAGE=0
-for CONFIG in $CONFIGS; do
+# run pretraining     -x HOROVOD_AUTOTUNE=1 \
+  #   -x NCCL_P2P_LEVEL=4 \
+  # -x NCCL_SOCKET_IFNAME=ib \
+# mpirun --allow-run-as-root -np $NP \
+#   -hostfile /data/run/hostfile \
+#   -bind-to none -map-by slot \
+#   -x NCCL_DEBUG=INFO \
+#   -x HSA_FORCE_FINE_GRAIN_PCIE=1 \
+#   -x LD_LIBRARY_PATH -x PATH \
+#   -mca pml ob1 -mca btl ^openib \
+python3 $CODE_DIR/run_squad.py \
+  --vocab_file=$TRAIN_DIR/vocab.txt \
+  --bert_config_file=$TRAIN_DIR/bert_config.json \
+  --init_checkpoint=$LAST_STAGE \
+  --do_train=True \
+  --train_file=$SQUAD_DATA_DIR/train-v1.1.json \
+  --do_predict=True \
+  --predict_file=$SQUAD_DATA_DIR/dev-v1.1.json \
+  --train_batch_size=$SQUAD_BATCH \
+  --learning_rate=$SQUAD_LN_RATE \
+  --num_train_epochs=$SQUAD_EPOCH \
+  --max_seq_length=$SQUAD_SEQ \
+  --doc_stride=$SQUAD_STRIDE \
+  --output_dir=$SQUAD_DIR \
+2>&1 | tee $SQUAD_DIR/run_output.txt
 
-  IFS=","
-  set -- $CONFIG
+echo "Run time     :" $SECONDS sec >> $SQUAD_DIR/run_record.txt
+echo "times output :"              >> $SQUAD_DIR/run_record.txt
+times                              >> $SQUAD_DIR/run_record.txt
+echo "FINISHED on " $(date)        >> $SQUAD_DIR/run_record.txt
 
-  SEQ=$1
-  BATCH=$2
-  STEPS=$3
-  WARMUP=$4
-  MAX_PRED=$(calc_max_pred $SEQ)
-
-  if [ "$STAGE" -gt 0 ]; then
-    PREV_STAGE=$[$STAGE-1]
-    echo STAGE $STAGE: Trying to find the last checkpoint from STAGE $PREV_STAGE
-    #find_last_ckpt $TRAIN_DIR/Train_Stage$PREV_STAGE
-    LAST_CKPT=$TRAIN_DIR/Train_Stage$PREV_STAGE
-    if [ ! -d $LAST_CKPT ]; then
-      echo "The checkpoint of the previous stage is not found."
-      LAST_CKPT=
-    fi
-  fi
-
-  #CUR_TRAIN_DIR=$TRAIN_DIR/seq${SEQ}_ba${BATCH}_step$STEPS
-  CUR_TRAIN_DIR=$TRAIN_DIR/Train_Stage$STAGE
-  #echo exec $CUR_TRAIN_DIR
-  let STAGE+=1
-
-  if [ -z $TEST ]; then
-    WIKI_TFRECORD_DIR=$DATA_DIR/wiki_tfrecord_seq${SEQ}
-  else
-    WIKI_TFRECORD_DIR=$DATA_DIR/wiki_tsrecord_seq${SEQ}
-  fi
-
-  echo "Model        : $MODEL"           > $CUR_TRAIN_DIR/run_record.txt
-  echo "Test         : $TEST"           >> $CUR_TRAIN_DIR/run_record.txt
-  echo "Seq/Batch    : $SEQ/$BATCH"     >> $CUR_TRAIN_DIR/run_record.txt
-  echo "Max Pred     : $MAX_PRED"       >> $CUR_TRAIN_DIR/run_record.txt
-  echo "Steps/Warmup : $STEPS/$WARMUP"  >> $CUR_TRAIN_DIR/run_record.txt
-  echo "Init Ckpt    : $LAST_CKPT"      >> $CUR_TRAIN_DIR/run_record.txt
-  echo "STARTED on " $(date)            >> $CUR_TRAIN_DIR/run_record.txt
-
-  # run pretraining     -x HOROVOD_AUTOTUNE=1 \
-    #   -x NCCL_P2P_LEVEL=4 \
-    # -x NCCL_SOCKET_IFNAME=ib \
-  mpirun --allow-run-as-root -np $NP \
-    -hostfile /data/run/hostfile \
-    -bind-to none -map-by slot \
-    -x NCCL_DEBUG=INFO \
-    -x HSA_FORCE_FINE_GRAIN_PCIE=1 \
-    -x LD_LIBRARY_PATH -x PATH \
-    -mca pml ob1 -mca btl ^openib \
-  python3 $CODE_DIR/run_pretraining.py \
-    --input_file=$WIKI_TFRECORD_DIR/*.tfrecord \
-    --output_dir=$CUR_TRAIN_DIR \
-    --init_checkpoint=$LAST_CKPT \
-    --do_train=True \
-    --do_eval=True \
-    --use_horovod=True \
-    --bert_config_file=$TRAIN_DIR/bert_config.json \
-    --train_batch_size=$BATCH \
-    --max_seq_length=$SEQ \
-    --max_predictions_per_seq=$MAX_PRED \
-    --num_train_steps=$STEPS \
-    --num_warmup_steps=$WARMUP \
-    --learning_rate=$LRN_RT \
-  2>&1 | tee $CUR_TRAIN_DIR/run_output.txt
-
-  echo "Run time     :" $SECONDS sec >> $CUR_TRAIN_DIR/run_record.txt
-  echo "times output :"              >> $CUR_TRAIN_DIR/run_record.txt
-  times                              >> $CUR_TRAIN_DIR/run_record.txt
-  echo "FINISHED on " $(date)        >> $CUR_TRAIN_DIR/run_record.txt
-
-done
