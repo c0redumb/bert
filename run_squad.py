@@ -634,7 +634,8 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
 
     initialized_variable_names = {}
     scaffold_fn = None
-    if init_checkpoint:
+    if init_checkpoint and (hvd == None or hvd.rank() == 0):
+      tf.logging.info("**** Init Checkpoint {} {} ****".format(hvd.rank(), init_checkpoint))
       (assignment_map, initialized_variable_names
       ) = modeling.get_assignment_map_from_checkpoint(tvars, init_checkpoint)
       if use_tpu:

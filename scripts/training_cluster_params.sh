@@ -28,7 +28,7 @@ LM_PROB=0.15
 # Input is the seq length
 calc_max_pred()
 {
-  echo $(python3 -c "print(int($1*$LM_PROB/1+1))")
+  echo $(python3 -c "import math; print(math.ceil($1*$LM_PROB))")
 }
 
 # Configurations of the training
@@ -50,7 +50,7 @@ DATA_DIR=/data/wikipedia
 
 DO_SQUAD=1
 
-SQUAD_DATA_DIR=/data/squad
+SQUAD_DATA_DIR=/data/squad/1.1
 
 SQUAD_BATCH=1
 SQUAD_SEQ=128

@@ -8,7 +8,7 @@ fi
 
 # Determine sequence length and max_predictions_per_seq
 SCRIPTPATH=$(dirname $(realpath $0))
-source $SCRIPTPATH/params.sh
+source $SCRIPTPATH/training_cluster_params.sh
 
 SEQ=$1
 MAX_PRED=$(calc_max_pred $SEQ)

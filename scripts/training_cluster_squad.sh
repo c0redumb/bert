@@ -53,16 +53,16 @@ echo "Learn Rate   : $SQUAD_LN_RATE"            >> $SQUAD_DIR/run_record.txt
 echo "Init Ckpt    : $LAST_STAGE"               >> $SQUAD_DIR/run_record.txt
 echo "STARTED on " $(date)                      >> $SQUAD_DIR/run_record.txt
 
-# run pretraining     -x HOROVOD_AUTOTUNE=1 \
+# run squad     -x HOROVOD_AUTOTUNE=1 \
   #   -x NCCL_P2P_LEVEL=4 \
   # -x NCCL_SOCKET_IFNAME=ib \
-# mpirun --allow-run-as-root -np $NP \
-#   -hostfile /data/run/hostfile \
-#   -bind-to none -map-by slot \
-#   -x NCCL_DEBUG=INFO \
-#   -x HSA_FORCE_FINE_GRAIN_PCIE=1 \
-#   -x LD_LIBRARY_PATH -x PATH \
-#   -mca pml ob1 -mca btl ^openib \
+mpirun --allow-run-as-root -np $NP \
+  -hostfile /data/run/hostfile \
+  -bind-to none -map-by slot \
+  -x NCCL_DEBUG=INFO \
+  -x HSA_FORCE_FINE_GRAIN_PCIE=1 \
+  -x LD_LIBRARY_PATH -x PATH \
+  -mca pml ob1 -mca btl ^openib \
 python3 $CODE_DIR/run_squad.py \
   --vocab_file=$TRAIN_DIR/vocab.txt \
   --bert_config_file=$TRAIN_DIR/bert_config.json \
@@ -77,7 +77,10 @@ python3 $CODE_DIR/run_squad.py \
   --max_seq_length=$SQUAD_SEQ \
   --doc_stride=$SQUAD_STRIDE \
   --output_dir=$SQUAD_DIR \
+  --use_horovod=True \
 2>&1 | tee $SQUAD_DIR/run_output.txt
+
+python3 $CODE_DIR/../squad/evaluate-v1.1.py $SQUAD_DATA_DIR/dev-v1.1.json $SQUAD_DIR/predictions.json > $SQUAD_DIR/squad_output.txt
 
 echo "Run time     :" $SECONDS sec >> $SQUAD_DIR/run_record.txt
 echo "times output :"              >> $SQUAD_DIR/run_record.txt
