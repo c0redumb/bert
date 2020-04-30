@@ -36,10 +36,13 @@ calc_max_pred()
 # There are two sets. This is correspond to the two pre=training stages.
 # The first stage is usually with Seq128 to 90%.
 # The second stage is usually with Seq512 from 90% to 100%
-CONFIGS="128,9,1600,1000 128,9,1600,1000"
+CONFIGS="128,9,240,80 128,9,240,80"
+
+# Initial checkpoint to be loaded by the first stage
+INIT_CKPT=$CODE_DIR/../../data/initial_checkpoint
 
 # Horovod (number of workers)
-NP=24
+NP=8
 
 # Data directory
 DATA_DIR=/data/wikipedia
@@ -48,7 +51,7 @@ DATA_DIR=/data/wikipedia
 ### Parameters for SQuAD Tuning ###
 ###################################
 
-DO_SQUAD=1
+DO_SQUAD=
 
 SQUAD_DATA_DIR=/data/squad/1.1
 

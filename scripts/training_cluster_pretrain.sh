@@ -24,7 +24,9 @@ for CONFIG in $CONFIGS; do
   MAX_PRED=$(calc_max_pred $SEQ)
 
   LAST_CKPT=
-  if [ "$STAGE" -gt 0 ]; then
+  if [ "$STAGE" -le 0 ]; then
+    LAST_CKPT=$INIT_CKPT
+  else
     PREV_STAGE=$[$STAGE-1]
     echo STAGE $STAGE: Trying to find the last checkpoint from STAGE $PREV_STAGE
     LAST_CKPT=$TRAIN_DIR/Pretrain_Stage_$PREV_STAGE
