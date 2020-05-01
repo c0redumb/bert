@@ -56,7 +56,7 @@ echo "STARTED on " $(date)                      >> $SQUAD_DIR/run_record.txt
 # run squad     -x HOROVOD_AUTOTUNE=1 \
   #   -x NCCL_P2P_LEVEL=4 \
   # -x NCCL_SOCKET_IFNAME=ib \
-mpirun --allow-run-as-root -np $NP \
+mpirun --allow-run-as-root -np $SQUAD_NP \
   -hostfile /data/run/hostfile \
   -bind-to none -map-by slot \
   -x NCCL_DEBUG=INFO \
