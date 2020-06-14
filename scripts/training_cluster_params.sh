@@ -40,12 +40,12 @@ calc_max_pred()
 # The first stage is usually with Seq128 to 90%.
 # The second stage is usually with Seq512 from 90% to 100%
 # Full Train (by estimation)
-CONFIGS="128,40,6400000,500000 512,6,800000,64000"
+#CONFIGS="128,40,6400000,500000 512,6,800000,64000"
 # Halfway (by estimation)
 #CONFIGS="128,40,3200000,250000 512,6,400000,32000"
 # Quick Test
 #CONFIGS="128,40,3200,320 512,6,400,32"
-#CONFIGS="128,40,3200,320 512,6,400,32"
+CONFIGS="512,6,2000000,200000"
 
 # Horovod (number of workers)
 NP=64
@@ -57,9 +57,9 @@ DATA_DIR=/data/wikipedia
 ### Parameters for SQuAD Tuning ###
 ###################################
 
-DO_SQUAD=
+DO_SQUAD=1
 
-SQUAD_NP=$NP
+SQUAD_NP=8
 
 SQUAD_DATA_DIR=/data/squad/1.1
 
