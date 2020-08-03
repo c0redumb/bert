@@ -162,6 +162,7 @@ class BertModel(object):
         input_shape = get_shape_list(input_ids, expected_rank=2)
         batch_size = input_shape[0]
         seq_length = input_shape[1]
+        # print(input_shape)
 
         if input_mask is None:
             input_mask = tf.ones(
@@ -172,69 +173,78 @@ class BertModel(object):
                 shape=[batch_size, seq_length], dtype=tf.int32)
 
         with tf.compat.v1.variable_scope(scope, default_name="bert"):
-            with tf.compat.v1.variable_scope("embeddings"):
-                # Perform embedding lookup on the word ids.
-                (self.embedding_output, self.embedding_table) = embedding_lookup(
-                    input_ids=input_ids,
-                    vocab_size=config.vocab_size,
-                    embedding_size=config.hidden_size,
-                    initializer_range=config.initializer_range,
-                    word_embedding_name="word_embeddings",
-                    use_one_hot_embeddings=use_one_hot_embeddings)
+            # with tf.compat.v1.variable_scope("embeddings"):
+            #     # Perform embedding lookup on the word ids.
+            #     (self.embedding_output, self.embedding_table) = embedding_lookup(
+            #         input_ids=input_ids,
+            #         vocab_size=config.vocab_size,
+            #         embedding_size=config.hidden_size,
+            #         initializer_range=config.initializer_range,
+            #         word_embedding_name="word_embeddings",
+            #         use_one_hot_embeddings=use_one_hot_embeddings)
 
-                # Add positional embeddings and token type embeddings, then layer
-                # normalize and perform dropout.
-                self.embedding_output = embedding_postprocessor(
-                    input_tensor=self.embedding_output,
-                    use_token_type=True,
-                    token_type_ids=token_type_ids,
-                    token_type_vocab_size=config.type_vocab_size,
-                    token_type_embedding_name="token_type_embeddings",
-                    use_position_embeddings=True,
-                    position_embedding_name="position_embeddings",
-                    initializer_range=config.initializer_range,
-                    max_position_embeddings=config.max_position_embeddings,
-                    dropout_prob=config.hidden_dropout_prob)
+            #     # Add positional embeddings and token type embeddings, then layer
+            #     # normalize and perform dropout.
+            #     self.embedding_output = embedding_postprocessor(
+            #         input_tensor=self.embedding_output,
+            #         use_token_type=True,
+            #         token_type_ids=token_type_ids,
+            #         token_type_vocab_size=config.type_vocab_size,
+            #         token_type_embedding_name="token_type_embeddings",
+            #         use_position_embeddings=True,
+            #         position_embedding_name="position_embeddings",
+            #         initializer_range=config.initializer_range,
+            #         max_position_embeddings=config.max_position_embeddings,
+            #         dropout_prob=config.hidden_dropout_prob)
+            (self.embedding_output, self.embedding_table) = Embedding(
+                embedding_size=config.hidden_size,
+                vocab_size=config.vocab_size,
+                token_type_vocab_size=config.type_vocab_size,
+                max_position_embeddings=config.max_position_embeddings,
+                init_range=config.initializer_range,
+                dropout_prob=config.hidden_dropout_prob,
+                name="embedding_layer"
+            )(input_ids, token_type_ids, training=is_training)
 
-            with tf.compat.v1.variable_scope("encoder"):
-                # This converts a 2D mask of shape [batch_size, seq_length] to a 3D
-                # mask of shape [batch_size, seq_length, seq_length] which is used
-                # for the attention scores.
-                attention_mask = create_attention_mask_from_input_mask(
-                    input_ids, input_mask)
+            # with tf.compat.v1.variable_scope("encoder"):
+            # This converts a 2D mask of shape [batch_size, seq_length] to a 3D
+            # mask of shape [batch_size, seq_length, seq_length] which is used
+            # for the attention scores.
+            attention_mask = create_attention_mask_from_input_mask(
+                input_ids, input_mask)
 
-                # Run the stacked transformer.
-                # `sequence_output` shape = [batch_size, seq_length, hidden_size].
-                # self.all_encoder_layers = transformer_model(
-                #     input_tensor=self.embedding_output,
-                #     attention_mask=attention_mask,
-                #     hidden_size=config.hidden_size,
-                #     num_hidden_layers=config.num_hidden_layers,
-                #     num_attention_heads=config.num_attention_heads,
-                #     intermediate_size=config.intermediate_size,
-                #     intermediate_act_fn=get_activation(config.hidden_act),
-                #     hidden_dropout_prob=config.hidden_dropout_prob,
-                #     attention_probs_dropout_prob=config.attention_probs_dropout_prob,
-                #     initializer_range=config.initializer_range,
-                #     do_return_all_layers=True,
-                #     training=is_training)
-                self.all_encoder_layers = []
-                layer_input = self.embedding_output
+            # Run the stacked transformer.
+            # `sequence_output` shape = [batch_size, seq_length, hidden_size].
+            # self.all_encoder_layers = transformer_model(
+            #     input_tensor=self.embedding_output,
+            #     attention_mask=attention_mask,
+            #     hidden_size=config.hidden_size,
+            #     num_hidden_layers=config.num_hidden_layers,
+            #     num_attention_heads=config.num_attention_heads,
+            #     intermediate_size=config.intermediate_size,
+            #     intermediate_act_fn=get_activation(config.hidden_act),
+            #     hidden_dropout_prob=config.hidden_dropout_prob,
+            #     attention_probs_dropout_prob=config.attention_probs_dropout_prob,
+            #     initializer_range=config.initializer_range,
+            #     do_return_all_layers=True,
+            #     training=is_training)
+            self.all_encoder_layers = []
+            layer_input = self.embedding_output
 
-                for idx in range(config.num_hidden_layers):
-                    layer_output = TransformerEncoder(
-                        num_attention_heads=config.num_attention_heads,
-                        hidden_size=config.hidden_size,
-                        intermediate_size=config.intermediate_size,
-                        intermediate_act_fn=config.hidden_act,
-                        attn_probs_dropout_prob=config.attention_probs_dropout_prob,
-                        other_dropout_prob=config.hidden_dropout_prob,
-                        init_range=config.initializer_range,
-                        name="encoder_layer_%d" % idx
-                    )(layer_input, attention_mask=attention_mask, training=is_training)
+            for idx in range(config.num_hidden_layers):
+                layer_output = TransformerEncoder(
+                    num_attention_heads=config.num_attention_heads,
+                    hidden_size=config.hidden_size,
+                    intermediate_size=config.intermediate_size,
+                    intermediate_act_fn=config.hidden_act,
+                    attn_probs_dropout_prob=config.attention_probs_dropout_prob,
+                    other_dropout_prob=config.hidden_dropout_prob,
+                    init_range=config.initializer_range,
+                    name="encoder_layer_%d" % idx
+                )(layer_input, attention_mask=attention_mask, training=is_training)
 
-                    self.all_encoder_layers.append(layer_output)
-                    layer_input = layer_output
+                self.all_encoder_layers.append(layer_output)
+                layer_input = layer_output
 
             self.sequence_output = self.all_encoder_layers[-1]
             # The "pooler" converts the encoded sequence tensor of shape
@@ -242,16 +252,22 @@ class BertModel(object):
             # [batch_size, hidden_size]. This is necessary for segment-level
             # (or segment-pair-level) classification tasks where we need a fixed
             # dimensional representation of the segment.
-            with tf.compat.v1.variable_scope("pooler"):
-                # We "pool" the model by simply taking the hidden state corresponding
-                # to the first token. We assume that this has been pre-trained
-                first_token_tensor = tf.squeeze(
-                    self.sequence_output[:, 0:1, :], axis=1)
-                self.pooled_output = tf.compat.v1.layers.dense(
-                    first_token_tensor,
-                    config.hidden_size,
-                    activation=tf.tanh,
-                    kernel_initializer=create_initializer(config.initializer_range))
+            # with tf.compat.v1.variable_scope("pooler"):
+            #     # We "pool" the model by simply taking the hidden state corresponding
+            #     # to the first token. We assume that this has been pre-trained
+            #     first_token_tensor = tf.squeeze(
+            #         self.sequence_output[:, 0:1, :], axis=1)
+            #     self.pooled_output = tf.compat.v1.layers.dense(
+            #         first_token_tensor,
+            #         config.hidden_size,
+            #         activation=tf.tanh,
+            #         kernel_initializer=create_initializer(config.initializer_range))
+            self.pooled_output = Pooler(
+                hidden_size=config.hidden_size,
+                act_fn="tanh",
+                init_range=config.initializer_range,
+                name="pooler_layer"
+            )(self.sequence_output)
 
     def get_pooled_output(self):
         return self.pooled_output
@@ -403,6 +419,209 @@ def create_initializer(initializer_range=0.02):
     """Creates a `truncated_normal_initializer` with the given range."""
     # return tf.compat.v1.truncated_normal_initializer(stddev=initializer_range)
     return tf.keras.initializers.TruncatedNormal(stddev=initializer_range)
+
+
+class Embedding(tf.keras.layers.Layer):
+    """Embedding layer in BERT
+
+    This layer performs word embeddings, segment type embedding, and
+    position embeddings as described in the BERT paper.
+    """
+
+    def __init__(self,
+                 embedding_size,
+                 vocab_size,
+                 token_type_vocab_size=None,
+                 max_position_embeddings=None,
+                 init_range=0.0,
+                 dropout_prob=0.0,
+                 **kwargs):
+        """Initialize Embedding for BERT
+
+        Args:
+          embedding_size: int, size of embedding, matchs hidden size of encoder
+          vocab_size: int, size of the vocabulary
+          token_type_vocab_size: int, size of token types (for next sentense prediction)
+          max_position_embeddings: int, max position embedding range
+          init_range: float, range of initializer
+          dropout_prob: float, dropout rate for training
+        """
+        super(Embedding, self).__init__(**kwargs)
+        self._embedding_size = embedding_size
+        self._vocab_size = vocab_size
+        self._token_type_vocab_size = token_type_vocab_size
+        self._max_position_embeddings = max_position_embeddings
+        self._init_range = init_range
+        self._dropout_prob = dropout_prob
+
+    def build(self, input_shape):
+        self._word_embedding_table = self.add_weight(
+            shape=[self._vocab_size, self._embedding_size],
+            initializer=create_initializer(self._init_range),
+            trainable=True,
+            name="word_embedding")
+        self._token_type_table = self.add_weight(
+            shape=[self._token_type_vocab_size, self._embedding_size],
+            initializer=create_initializer(self._init_range),
+            trainable=True,
+            name="type_embedding")
+        self._position_embedding_table = self.add_weight(
+            shape=[self._max_position_embeddings, self._embedding_size],
+            initializer=create_initializer(self._init_range),
+            trainable=True,
+            name="position_embedding")
+        self._layer_norm = tf.keras.layers.LayerNormalization(
+            axis=-1, epsilon=1e-12,
+            name="embedding_norm")
+        self._dropout = tf.keras.layers.Dropout(
+            rate=self._dropout_prob,
+            name="embedding_dropout")
+        super(Embedding, self).build(input_shape)
+
+    def get_config(self):
+        return {
+            "embedding_size": self._embedding_size,
+            "vocab_size": self._vocab_size,
+            "token_type_vocab_size": self._token_type_vocab_size,
+            "max_position_embeddings": self._max_position_embeddings,
+            "init_range": self._init_range,
+            "dropout_prob": self._dropout_prob,
+        }
+
+    def call(self, input_ids, token_type_ids, training=None):
+        """Return outputs of the embedding
+
+        Args:
+          input_ids: input sequence with shape [batch_size, seq_length]
+          token_type_ids: input type sequence with shape [batch_size, seq_length]
+          training: boolean, whether in training mode or not
+
+        Returns:
+          Output of the embedding for BERT
+          tensor with shape [batch_size, seq_length, embedding_size]
+        """
+
+        # Retrieve dynamically known shapes
+        input_shape = input_ids.shape.as_list()
+        batch_size = input_shape[0]
+        seq_length = input_shape[1]
+        output_shape = input_shape.copy()
+        output_shape.append(self._embedding_size)
+        #print(input_shape, output_shape)
+
+        # Word Embedding
+        flat_input_ids = tf.reshape(input_ids, [-1])
+        word_embedding_output = tf.gather(
+            self._word_embedding_table, flat_input_ids)
+        word_embedding_output = tf.reshape(word_embedding_output, output_shape)
+
+        # Token type embedding
+        # This vocab will be small so we always do one-hot here, since it is always
+        # faster for a small vocabulary.
+        flat_token_type_ids = tf.reshape(token_type_ids, [-1])
+        one_hot_token_type_ids = tf.one_hot(
+            flat_token_type_ids, depth=self._token_type_vocab_size)
+        token_type_embeddings_output = tf.matmul(
+            one_hot_token_type_ids, self._token_type_table)
+        token_type_embeddings_output = tf.reshape(
+            token_type_embeddings_output, output_shape)
+
+        # Position embedding
+        assert_op = tf.compat.v1.assert_less_equal(
+            seq_length, self._max_position_embeddings)
+        with tf.control_dependencies([assert_op]):
+            # Since the position embedding table is a learned variable, we create it
+            # using a (long) sequence length `max_position_embeddings`. The actual
+            # sequence length might be shorter than this, for faster training of
+            # tasks that do not have long sequences.
+            #
+            # So `full_position_embeddings` is effectively an embedding table
+            # for position [0, 1, 2, ..., max_position_embeddings-1], and the current
+            # sequence has positions [0, 1, 2, ... seq_length-1], so we can just
+            # perform a slice.
+            position_embeddings_output = tf.slice(self._position_embedding_table, [0, 0],
+                                                  [seq_length, -1])
+            # Now this has dimension [seq_length, embedding_size], we just need
+            # to extend one dimension so it is broadcasted to the entire batch.
+            position_embeddings_output = tf.expand_dims(
+                position_embeddings_output, axis=0)
+
+        # Summing all the embeddings together
+        embedding_output = word_embedding_output + \
+            token_type_embeddings_output + position_embeddings_output
+
+        # Layer Norm and Drop out
+        embedding_output = self._layer_norm(
+            embedding_output, training=training)
+        embedding_output = self._dropout(embedding_output, training=training)
+
+        return (embedding_output, self._word_embedding_table)
+
+    def get_embedding_table(self):
+        return self._word_embedding_table
+
+
+class Pooler(tf.keras.layers.Layer):
+    """Pooler layer in BERT
+
+    This is just a simple dense layer on the output of the first state
+    """
+
+    def __init__(self,
+                 hidden_size,
+                 act_fn="tanh",
+                 init_range=0.0,
+                 **kwargs):
+        """Initialize Pooler for BERT
+
+        Args:
+          hidden_size: int, size of dense layer
+          act_fn: activation function
+          init_range: float, range of initializer
+        """
+        super(Pooler, self).__init__(**kwargs)
+        self._hidden_size = hidden_size
+        self._act_fn = act_fn
+        self._init_range = init_range
+
+    def build(self, input_shape):
+        self._pooler_dense = tf.keras.layers.Dense(
+            self._hidden_size,
+            activation=get_activation(self._act_fn),
+            kernel_initializer=create_initializer(self._init_range),
+            name="pooler_dense")
+        super(Pooler, self).build(input_shape)
+
+    def get_config(self):
+        return {
+            "hidden_size": self._hidden_size,
+            "act_fn": self._act_fn,
+            "init_range": self._init_range
+        }
+
+    def call(self, input_tensor, training=None):
+        """Return outputs of the embedding
+
+        Args:
+          input_tensor: input sequence with shape [batch_size, seq_length, hidden_size]
+          training: boolean, whether in training mode or not
+
+        Returns:
+          Output of the pooler for BERT
+          tensor with shape [batch_size, embedding_size]
+        """
+
+        # Retrieve dynamically known shapes
+        # input_shape = input_tensor.shape.as_list()
+        # batch_size = input_shape[0]
+        # seq_length = input_shape[1]
+
+        # We "pool" the model by simply taking the hidden state corresponding
+        # to the first token. We assume that this has been pre-trained
+        first_token_tensor = tf.squeeze(input_tensor[:, 0:1, :], axis=1)
+        output = self._pooler_dense(first_token_tensor)
+
+        return output
 
 
 def embedding_lookup(input_ids,
