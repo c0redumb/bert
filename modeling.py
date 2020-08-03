@@ -205,19 +205,36 @@ class BertModel(object):
 
                 # Run the stacked transformer.
                 # `sequence_output` shape = [batch_size, seq_length, hidden_size].
-                self.all_encoder_layers = transformer_model(
-                    input_tensor=self.embedding_output,
-                    attention_mask=attention_mask,
-                    hidden_size=config.hidden_size,
-                    num_hidden_layers=config.num_hidden_layers,
-                    num_attention_heads=config.num_attention_heads,
-                    intermediate_size=config.intermediate_size,
-                    intermediate_act_fn=get_activation(config.hidden_act),
-                    hidden_dropout_prob=config.hidden_dropout_prob,
-                    attention_probs_dropout_prob=config.attention_probs_dropout_prob,
-                    initializer_range=config.initializer_range,
-                    do_return_all_layers=True,
-                    training=is_training)
+                # self.all_encoder_layers = transformer_model(
+                #     input_tensor=self.embedding_output,
+                #     attention_mask=attention_mask,
+                #     hidden_size=config.hidden_size,
+                #     num_hidden_layers=config.num_hidden_layers,
+                #     num_attention_heads=config.num_attention_heads,
+                #     intermediate_size=config.intermediate_size,
+                #     intermediate_act_fn=get_activation(config.hidden_act),
+                #     hidden_dropout_prob=config.hidden_dropout_prob,
+                #     attention_probs_dropout_prob=config.attention_probs_dropout_prob,
+                #     initializer_range=config.initializer_range,
+                #     do_return_all_layers=True,
+                #     training=is_training)
+                self.all_encoder_layers = []
+                layer_input = self.embedding_output
+
+                for idx in range(config.num_hidden_layers):
+                    layer_output = TransformerEncoder(
+                        num_attention_heads=config.num_attention_heads,
+                        hidden_size=config.hidden_size,
+                        intermediate_size=config.intermediate_size,
+                        intermediate_act_fn=config.hidden_act,
+                        attn_probs_dropout_prob=config.attention_probs_dropout_prob,
+                        other_dropout_prob=config.hidden_dropout_prob,
+                        init_range=config.initializer_range,
+                        name="encoder_layer_%d" % idx
+                    )(layer_input, attention_mask=attention_mask, training=is_training)
+
+                    self.all_encoder_layers.append(layer_output)
+                    layer_input = layer_output
 
             self.sequence_output = self.all_encoder_layers[-1]
             # The "pooler" converts the encoded sequence tensor of shape
@@ -384,7 +401,8 @@ def layer_norm_and_dropout(input_tensor, dropout_prob, name=None):
 
 def create_initializer(initializer_range=0.02):
     """Creates a `truncated_normal_initializer` with the given range."""
-    return tf.compat.v1.truncated_normal_initializer(stddev=initializer_range)
+    # return tf.compat.v1.truncated_normal_initializer(stddev=initializer_range)
+    return tf.keras.initializers.TruncatedNormal(stddev=initializer_range)
 
 
 def embedding_lookup(input_ids,
@@ -974,11 +992,183 @@ class FeedForwardNetwork(tf.keras.layers.Layer):
         length = tf.shape(x)[1]
 
         output = self._filter_dense_layer(x)
+        output = self._output_dense_layer(output)
         if training:
             output = tf.nn.dropout(output, rate=self._dropout)
-        output = self._output_dense_layer(output)
 
         return output
+
+
+class TransformerEncoder(tf.keras.layers.Layer):
+    """
+    Multi-headed transformer encoder layer from "Attention is All You Need".
+
+    This is almost an exact implementation of the original Transformer encoder.
+
+    See the original paper:
+    https://arxiv.org/abs/1706.03762
+
+    Also see:
+    https://github.com/tensorflow/tensor2tensor/blob/master/tensor2tensor/models/transformer.py
+    """
+
+    """
+
+    Args:
+    TODO: Update these below
+      input_tensor: float Tensor of shape [batch_size, seq_length, hidden_size].
+      attention_mask: (optional) int32 Tensor of shape [batch_size, seq_length,
+        seq_length], with 1 for positions that can be attended to and 0 in
+        positions that should not be.
+      hidden_size: int. Hidden size of the Transformer.
+      num_hidden_layers: int. Number of layers (blocks) in the Transformer.
+      num_attention_heads: int. Number of attention heads in the Transformer.
+      intermediate_size: int. The size of the "intermediate" (a.k.a., feed
+        forward) layer.
+      intermediate_act_fn: function. The non-linear activation function to apply
+        to the output of the intermediate/feed-forward layer.
+      hidden_dropout_prob: float. Dropout probability for the hidden layers.
+      attention_probs_dropout_prob: float. Dropout probability of the attention
+        probabilities.
+      initializer_range: float. Range of the initializer (stddev of truncated
+        normal).
+      do_return_all_layers: Whether to also return all layers or just the final
+        layer.
+
+    Returns:
+      float Tensor of shape [batch_size, seq_length, hidden_size], the final
+      hidden layer of the Transformer.
+
+    Raises:
+      ValueError: A Tensor shape or parameter is invalid.
+    """
+
+    def __init__(self,
+                 num_attention_heads=12,
+                 hidden_size=768,
+                 intermediate_size=1024,
+                 intermediate_act_fn='gelu',
+                 attn_probs_dropout_prob=0.1,
+                 other_dropout_prob=0.1,
+                 init_range=0.02,
+                 **kwargs):
+        """Initialize Transformer Encoder
+
+        Args:
+          num_attention_heads: int, number of attention heads
+          hidden_size: int, total hidden size. It should be divisable by num_attention_heads
+          intermediate_size: int, the size of the intermediate feed forward network
+          attn_probs_dropout_prob: float, the dropout probability of the attention probability
+          other_dropout_prob: float, the dropout probability for all other places
+          init_range: float, range of initializer
+        """
+        if hidden_size % num_attention_heads != 0:
+            raise ValueError(
+                "The hidden size (%d) is not a multiple of the number of attention "
+                "heads (%d)" % (hidden_size, num_attention_heads))
+
+        super(TransformerEncoder, self).__init__(**kwargs)
+        self._num_attention_heads = num_attention_heads
+        self._hidden_size = hidden_size
+        self._intermediate_size = intermediate_size
+        self._intermediate_act_fn = intermediate_act_fn
+        self._attn_probs_dropout_prob = attn_probs_dropout_prob
+        self._other_dropout_prob = other_dropout_prob
+        self._init_range = init_range
+
+        self._size_per_head = int(hidden_size / num_attention_heads)
+
+    def build(self, input_shape):
+        blocks = {}
+        blocks['attention'] = Attention(
+            num_attention_heads=self._num_attention_heads,
+            size_per_head=self._size_per_head,
+            query_act_fn='gelu',
+            key_act_fn='gelu',
+            value_act_fn='gelu',
+            init_range=self._init_range,
+            dropout=self._attn_probs_dropout_prob,
+            name="attn")
+        blocks['attention_output'] = tf.keras.layers.Dense(
+            self._hidden_size,
+            kernel_initializer=create_initializer(self._init_range),
+            name="attn_output")
+        blocks['attention_norm'] = tf.keras.layers.LayerNormalization(
+            axis=-1, epsilon=1e-12,
+            name="attn_norm")
+        blocks['ffn_filter'] = tf.keras.layers.Dense(
+            self._intermediate_size,
+            activation=get_activation(self._intermediate_act_fn),
+            kernel_initializer=create_initializer(self._init_range),
+            name="ffn_filter")
+        blocks['ffn_output'] = tf.keras.layers.Dense(
+            self._hidden_size,
+            kernel_initializer=create_initializer(self._init_range),
+            name="ffn_output")
+        blocks['ffn_norm'] = tf.keras.layers.LayerNormalization(
+            axis=-1, epsilon=1e-12,
+            name="ffn_norm")
+        self._blocks = blocks
+        super(TransformerEncoder, self).build(input_shape)
+
+    def get_config(self):
+        return {
+            "num_attention_heads": self._num_attention_heads,
+            "hidden_size": self._hidden_size,
+            "intermediate_size": self._intermediate_size,
+            "intermediate_act_fn": self._intermediate_act_fn,
+            "attn_probs_dropout_prob": self._attn_probs_dropout_prob,
+            "other_dropout_prob": self._other_dropout_prob,
+            "init_range": self._init_range
+        }
+
+    def call(self, input_tensor, attention_mask=None, training=None):
+        """Return outputs of the feedforward network.
+
+        Args:
+          input_tensor: tensor with shape [batch_size, seq_length, hidden_size]
+          attention_mask: tensor with shape [batch_size, seq_length, seq_length]
+          training: boolean, whether in training mode or not
+
+        Returns:
+          Output of the Transformer Encoder Stack
+          tensor with shape [batch_size, seq_length, hidden_size]
+        """
+        # Retrieve dynamically known shapes
+        # batch_size = tf.shape(input_tensor)[0]
+        # seq_length = tf.shape(input_tensor)[1]
+
+        layer_input = input_tensor
+        blocks = self._blocks
+
+        # Attention Layer (self attention)
+        attention_output = blocks['attention'](layer_input, layer_input,
+                                               attention_mask=attention_mask,
+                                               training=training)
+
+        # Attention Output and Dropout
+        attention_output = blocks['attention_output'](attention_output)
+        if training:
+            attention_output = tf.nn.dropout(attention_output,
+                                             rate=self._other_dropout_prob)
+
+        # Add and Normalize
+        attention_output = blocks['attention_norm'](
+            attention_output + layer_input)
+
+        # FeedForward Layer
+        ffn_output = blocks['ffn_filter'](attention_output)
+
+        # FeedForward Output and Dropout
+        ffn_output = blocks['ffn_output'](ffn_output)
+        if training:
+            ffn_output = tf.nn.dropout(ffn_output,
+                                       rate=self._other_dropout_prob)
+
+        # Add and Normalize
+        layer_output = blocks['ffn_norm'](ffn_output + attention_output)
+
+        return layer_output
 
 
 def transformer_model(input_tensor,
@@ -1051,7 +1241,7 @@ def transformer_model(input_tensor,
     # forth from a 3D tensor to a 2D tensor. Re-shapes are normally free on
     # the GPU/CPU but may not be free on the TPU, so we want to minimize them to
     # help the optimizer.
-    #prev_output = reshape_to_matrix(input_tensor)
+    # prev_output = reshape_to_matrix(input_tensor)
     prev_output = input_tensor
 
     all_layer_outputs = []
