@@ -510,7 +510,7 @@ def main(_):
     hvd.init()
     # [HVD] Use different output directories for different GPU's. 
     FLAGS.output_dir = FLAGS.output_dir if hvd.rank() == 0 else os.path.join(FLAGS.output_dir, str(hvd.rank()))
-    FLAGS.save_checkpoints_steps = FLAGS.save_checkpoints_steps if hvd.rank() == 0 else None
+    FLAGS.save_checkpoints_steps = FLAGS.save_checkpoints_steps # if hvd.rank() == 0 else None
     # [HVD] The training_steps for each GPU is the total steps divided by the number of GPU's.
     FLAGS.num_train_steps = FLAGS.num_train_steps // hvd.size()
     FLAGS.num_warmup_steps = FLAGS.num_warmup_steps // hvd.size()
