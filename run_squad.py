@@ -1162,7 +1162,7 @@ def main(_):
     hvd.init()
     # [HVD] Use different output directories for different GPU's. 
     FLAGS.output_dir = FLAGS.output_dir if hvd.rank() == 0 else os.path.join(FLAGS.output_dir, str(hvd.rank()))
-    FLAGS.save_checkpoints_steps = FLAGS.save_checkpoints_steps if hvd.rank() == 0 else None
+    FLAGS.save_checkpoints_steps = FLAGS.save_checkpoints_steps # if hvd.rank() == 0 else None
 
   bert_config = modeling.BertConfig.from_json_file(FLAGS.bert_config_file)
 
@@ -1279,7 +1279,7 @@ def main(_):
       hooks.append(hvd.BroadcastGlobalVariablesHook(0))
     estimator.train(input_fn=train_input_fn, max_steps=num_train_steps, hooks=hooks)
 
-  if FLAGS.do_predict:
+  if FLAGS.do_predict and (not use_hvd or hvd.rank() == 0):
     eval_examples = read_squad_examples(
         input_file=FLAGS.predict_file, is_training=False)
 

@@ -43,7 +43,7 @@ mkdir -p $SQUAD_DIR
 
 find_last_stage $TRAIN_DIR
 echo LAST_STAGE is $LAST_STAGE
-if [ -z "$LAST_STAGE"]; then
+if [ -z "$LAST_STAGE" ]; then
   echo "No last stage or init checkpoint set."   > $SQUAD_DIR/run_record.txt
   exit -1
 fi
@@ -83,7 +83,7 @@ python3 $CODE_DIR/run_squad.py \
   --use_horovod=True \
 2>&1 | tee $SQUAD_DIR/run_output.txt
 
-python3 $CODE_DIR/../squad/evaluate-v1.1.py $SQUAD_DATA_DIR/dev-v1.1.json $SQUAD_DIR/predictions.json > $SQUAD_DIR/squad_output.txt
+python3 $SQUAD_DATA_DIR/evaluate-v1.1.py $SQUAD_DATA_DIR/dev-v1.1.json $SQUAD_DIR/predictions.json > $SQUAD_DIR/squad_output.txt
 
 echo "Run time     :" $SECONDS sec >> $SQUAD_DIR/run_record.txt
 echo "times output :"              >> $SQUAD_DIR/run_record.txt

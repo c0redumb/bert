@@ -462,12 +462,11 @@ class Embedding(tf.keras.layers.Layer):
         """
 
         # Retrieve dynamically known shapes
-        input_shape = input_ids.shape.as_list()
+        input_shape = get_shape_list(input_ids, expected_rank=2)
         batch_size = input_shape[0]
         seq_length = input_shape[1]
         output_shape = input_shape.copy()
         output_shape.append(self._embedding_size)
-        #print(input_shape, output_shape)
 
         # Word Embedding
         flat_input_ids = tf.reshape(input_ids, [-1])
@@ -669,8 +668,8 @@ class Attention(tf.keras.layers.Layer):
         H = self._size_per_head
 
         # Retrieve dynamically known shapes
-        from_shape = from_tensor.shape.as_list()
-        to_shape = to_tensor.shape.as_list()
+        from_shape = get_shape_list(from_tensor, expected_rank=3)
+        to_shape = get_shape_list(to_tensor, expected_rank=3)
         B = from_shape[0]
         F = from_shape[1]
         T = to_shape[1]
@@ -1095,7 +1094,8 @@ def get_assignment_map_from_checkpoint(tvars, init_checkpoint):
         (name, var) = (x[0], x[1])
         if name not in name_to_variable:
             continue
-        assignment_map[name] = name
+        #assignment_map[name] = name
+        assignment_map[name] = name_to_variable[name]
         initialized_variable_names[name] = 1
         initialized_variable_names[name + ":0"] = 1
 
