@@ -26,7 +26,7 @@ import tensorflow as tf
 import tensorflow_hub as hub
 tf.compat.v1.disable_resource_variables()
 
-flags = tf.compat.v1.flags
+from absl import flags, logging, app
 
 FLAGS = flags.FLAGS
 
@@ -92,9 +92,9 @@ def model_fn_builder(num_labels, learning_rate, num_train_steps,
   def model_fn(features, labels, mode, params):  # pylint: disable=unused-argument
     """The `model_fn` for TPUEstimator."""
 
-    tf.compat.v1.logging.info("*** Features ***")
+    logging.info("*** Features ***")
     for name in sorted(features.keys()):
-      tf.compat.v1.logging.info("  name = %s, shape = %s" % (name, features[name].shape))
+      logging.info("  name = %s, shape = %s" % (name, features[name].shape))
 
     input_ids = features["input_ids"]
     input_mask = features["input_mask"]
@@ -157,7 +157,7 @@ def create_tokenizer_from_hub_module(bert_hub_module_handle):
 
 
 def main(_):
-  tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.INFO)
+  logging.set_verbosity(logging.INFO)
 
   processors = {
       "cola": run_classifier.ColaProcessor,
@@ -227,10 +227,10 @@ def main(_):
   if FLAGS.do_train:
     train_features = run_classifier.convert_examples_to_features(
         train_examples, label_list, FLAGS.max_seq_length, tokenizer)
-    tf.compat.v1.logging.info("***** Running training *****")
-    tf.compat.v1.logging.info("  Num examples = %d", len(train_examples))
-    tf.compat.v1.logging.info("  Batch size = %d", FLAGS.train_batch_size)
-    tf.compat.v1.logging.info("  Num steps = %d", num_train_steps)
+    logging.info("***** Running training *****")
+    logging.info("  Num examples = %d", len(train_examples))
+    logging.info("  Batch size = %d", FLAGS.train_batch_size)
+    logging.info("  Num steps = %d", num_train_steps)
     train_input_fn = run_classifier.input_fn_builder(
         features=train_features,
         seq_length=FLAGS.max_seq_length,
@@ -243,9 +243,9 @@ def main(_):
     eval_features = run_classifier.convert_examples_to_features(
         eval_examples, label_list, FLAGS.max_seq_length, tokenizer)
 
-    tf.compat.v1.logging.info("***** Running evaluation *****")
-    tf.compat.v1.logging.info("  Num examples = %d", len(eval_examples))
-    tf.compat.v1.logging.info("  Batch size = %d", FLAGS.eval_batch_size)
+    logging.info("***** Running evaluation *****")
+    logging.info("  Num examples = %d", len(eval_examples))
+    logging.info("  Batch size = %d", FLAGS.eval_batch_size)
 
     # This tells the estimator to run through the entire set.
     eval_steps = None
@@ -267,9 +267,9 @@ def main(_):
 
     output_eval_file = os.path.join(FLAGS.output_dir, "eval_results.txt")
     with tf.io.gfile.GFile(output_eval_file, "w") as writer:
-      tf.compat.v1.logging.info("***** Eval results *****")
+      logging.info("***** Eval results *****")
       for key in sorted(result.keys()):
-        tf.compat.v1.logging.info("  %s = %s", key, str(result[key]))
+        logging.info("  %s = %s", key, str(result[key]))
         writer.write("%s = %s\n" % (key, str(result[key])))
 
   if FLAGS.do_predict:
@@ -284,9 +284,9 @@ def main(_):
         predict_examples, label_list, FLAGS.max_seq_length, tokenizer,
         predict_file)
 
-    tf.compat.v1.logging.info("***** Running prediction*****")
-    tf.compat.v1.logging.info("  Num examples = %d", len(predict_examples))
-    tf.compat.v1.logging.info("  Batch size = %d", FLAGS.predict_batch_size)
+    logging.info("***** Running prediction*****")
+    logging.info("  Num examples = %d", len(predict_examples))
+    logging.info("  Batch size = %d", FLAGS.predict_batch_size)
 
     predict_input_fn = run_classifier.file_based_input_fn_builder(
         input_file=predict_file,
@@ -298,7 +298,7 @@ def main(_):
 
     output_predict_file = os.path.join(FLAGS.output_dir, "test_results.tsv")
     with tf.io.gfile.GFile(output_predict_file, "w") as writer:
-      tf.compat.v1.logging.info("***** Predict results *****")
+      logging.info("***** Predict results *****")
       for prediction in result:
         probabilities = prediction["probabilities"]
         output_line = "\t".join(
@@ -312,4 +312,4 @@ if __name__ == "__main__":
   flags.mark_flag_as_required("task_name")
   flags.mark_flag_as_required("bert_hub_module_handle")
   flags.mark_flag_as_required("output_dir")
-  tf.compat.v1.app.run()
+  app.run()

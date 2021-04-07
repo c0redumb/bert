@@ -34,7 +34,7 @@ try:
 except:
   hvd = None
 
-flags = tf.compat.v1.flags
+from absl import flags, logging, app
 
 FLAGS = flags.FLAGS
 
@@ -169,7 +169,7 @@ class LogSessionRunHook(tf.estimator.SessionRunHook):
       log_string += ', mlm_oss = %6.4e'%(mlm_loss)
       log_string += ', nsp_loss = %6.4e'%(nsp_loss)
       log_string += ', learning_rate = %6.4e'%(learning_rate)
-      tf.compat.v1.logging.info(log_string)
+      logging.info(log_string)
 
       if self.summary_writer is not None:
         throughput_summary = Summary(value=[Summary.Value(tag='throughput', simple_value=throughput)])
@@ -195,9 +195,9 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
   def model_fn(features, labels, mode, params):  # pylint: disable=unused-argument
     """The `model_fn` for TPUEstimator."""
 
-    tf.compat.v1.logging.info("*** Features ***")
+    logging.info("*** Features ***")
     for name in sorted(features.keys()):
-      tf.compat.v1.logging.info("  name = %s, shape = %s" % (name, features[name].shape))
+      logging.info("  name = %s, shape = %s" % (name, features[name].shape))
 
     input_ids = features["input_ids"]
     input_mask = features["input_mask"]
@@ -237,7 +237,7 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
     initialized_variable_names = {}
     scaffold_fn = None
     if init_checkpoint and (hvd == None or hvd.rank() == 0):
-      tf.compat.v1.logging.info("**** Init Checkpoint {} {} ****".format(hvd.rank(), init_checkpoint))
+      logging.info("**** Init Checkpoint {} {} ****".format(hvd.rank(), init_checkpoint))
       (assignment_map, initialized_variable_names
       ) = modeling.get_assignment_map_from_checkpoint(tvars, init_checkpoint)
       if use_tpu:
@@ -250,12 +250,12 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
       else:
         tf.compat.v1.train.init_from_checkpoint(init_checkpoint, assignment_map)
 
-    tf.compat.v1.logging.info("**** Trainable Variables ****")
+    logging.info("**** Trainable Variables ****")
     for var in tvars:
       init_string = ""
       if var.name in initialized_variable_names:
         init_string = ", *INIT_FROM_CKPT*"
-      tf.compat.v1.logging.info("  name = %s, shape = %s%s", var.name, var.shape,
+      logging.info("  name = %s, shape = %s%s", var.name, var.shape,
                       init_string)
 
     output_spec = None
@@ -490,7 +490,7 @@ def _decode_record(record, name_to_features):
 
 
 def main(_):
-  tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.INFO)
+  logging.set_verbosity(logging.INFO)
 
   # disable the log messages from being printed twice
   tf.compat.v1.get_logger().propagate = False
@@ -498,12 +498,12 @@ def main(_):
   use_amp = False
   if FLAGS.auto_mixed_precision:
     use_amp = True
-    tf.compat.v1.logging.info("TF AMP (Auto Mixed Precision) is enabled")
+    logging.info("TF AMP (Auto Mixed Precision) is enabled")
 
   use_hvd = False
   if FLAGS.use_horovod and hvd != None:
     use_hvd = True
-    tf.compat.v1.logging.info("Horovod enabled and used")
+    logging.info("Horovod enabled and used")
 
   if use_hvd:
     # [HVD] Initialize the library: basic bookkeeping, sets up communication between GPUs, allocates buffers etc.
@@ -526,9 +526,9 @@ def main(_):
   for input_pattern in FLAGS.input_file.split(","):
     input_files.extend(tf.io.gfile.glob(input_pattern))
 
-  tf.compat.v1.logging.info("*** Input Files ***")
+  logging.info("*** Input Files ***")
   for input_file in input_files:
-    tf.compat.v1.logging.info("  %s" % input_file)
+    logging.info("  %s" % input_file)
 
   tpu_cluster_resolver = None
   if FLAGS.use_tpu and FLAGS.tpu_name:
@@ -576,8 +576,8 @@ def main(_):
       eval_batch_size=FLAGS.eval_batch_size)
 
   if FLAGS.do_train:
-    tf.compat.v1.logging.info("***** Running training *****")
-    tf.compat.v1.logging.info("  Batch size = %d", FLAGS.train_batch_size)
+    logging.info("***** Running training *****")
+    logging.info("  Batch size = %d", FLAGS.train_batch_size)
     train_input_fn = input_fn_builder(
         input_files=input_files,
         max_seq_length=FLAGS.max_seq_length,
@@ -603,8 +603,8 @@ def main(_):
     estimator.train(input_fn=train_input_fn, max_steps=FLAGS.num_train_steps, hooks=hooks)
 
   if FLAGS.do_eval:
-    tf.compat.v1.logging.info("***** Running evaluation *****")
-    tf.compat.v1.logging.info("  Batch size = %d", FLAGS.eval_batch_size)
+    logging.info("***** Running evaluation *****")
+    logging.info("  Batch size = %d", FLAGS.eval_batch_size)
 
     eval_input_fn = input_fn_builder(
         input_files=input_files,
@@ -617,9 +617,9 @@ def main(_):
 
     output_eval_file = os.path.join(FLAGS.output_dir, "eval_results.txt")
     with tf.io.gfile.GFile(output_eval_file, "w") as writer:
-      tf.compat.v1.logging.info("***** Eval results *****")
+      logging.info("***** Eval results *****")
       for key in sorted(result.keys()):
-        tf.compat.v1.logging.info("  %s = %s", key, str(result[key]))
+        logging.info("  %s = %s", key, str(result[key]))
         writer.write("%s = %s\n" % (key, str(result[key])))
 
 
@@ -627,4 +627,4 @@ if __name__ == "__main__":
   flags.mark_flag_as_required("input_file")
   flags.mark_flag_as_required("bert_config_file")
   flags.mark_flag_as_required("output_dir")
-  tf.compat.v1.app.run()
+  app.run(main)
