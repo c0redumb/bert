@@ -6,11 +6,10 @@ from __future__ import print_function
 
 import os
 import modeling
-import modeling_old
+#import modeling_old as modeling
 import optimization
 import tensorflow as tf
-#tf.compat.v1.disable_eager_execution()
-tf.compat.v1.enable_eager_execution()
+tf.compat.v1.disable_eager_execution()
 
 import time
 from tensorflow.python.training.summary_io import SummaryWriterCache
@@ -455,141 +454,6 @@ def _decode_record(record, name_to_features):
 def main(_):
   logging.set_verbosity(logging.INFO)
 
-  logging.info("*** Input Files ***")
-  input_files = []
-  for input_pattern in FLAGS.input_file.split(","):
-    input_files.extend(tf.io.gfile.glob(input_pattern))
-  for input_file in input_files:
-    logging.info("  %s" % input_file)
-
-  logging.info("*** Loading the dataset ***")
-
-  # This is the name to feature mapping
-  # name_to_features = {
-  #   "input_ids":
-  #       tf.io.FixedLenFeature([max_seq_length], tf.int64),
-  #   "input_mask":
-  #       tf.io.FixedLenFeature([max_seq_length], tf.int64),
-  #   "segment_ids":
-  #       tf.io.FixedLenFeature([max_seq_length], tf.int64),
-  #   "masked_lm_positions":
-  #       tf.io.FixedLenFeature([max_predictions_per_seq], tf.int64),
-  #   "masked_lm_ids":
-  #       tf.io.FixedLenFeature([max_predictions_per_seq], tf.int64),
-  #   "masked_lm_weights":
-  #       tf.io.FixedLenFeature([max_predictions_per_seq], tf.float32),
-  #   "next_sentence_labels":
-  #       tf.io.FixedLenFeature([1], tf.int64),
-  # }
-
-  raw_dataset = tf.data.TFRecordDataset(input_files, compression_type='GZIP')
-  for raw_record in raw_dataset.take(1):
-    # Parse one example
-    example = tf.train.Example()
-    example.ParseFromString(raw_record.numpy())
-
-    # Extract the features from the example, and convert them to tensor
-    features = example.features.feature
-    input_ids = tf.convert_to_tensor(example.features.feature['input_ids'].int64_list.value, name='input_ids')
-    input_mask = tf.convert_to_tensor(example.features.feature['input_mask'].int64_list.value, name='input_mask')
-    segment_ids = tf.convert_to_tensor(example.features.feature['segment_ids'].int64_list.value, name='segment_ids')
-
-    # Expand the batch dimension (we use batch_size 1)
-    input_ids = tf.expand_dims(input_ids, axis=0)
-    input_mask = tf.expand_dims(input_mask, axis=0)
-    segment_ids = tf.expand_dims(segment_ids, axis=0)
-    print('input_ids shape:', input_ids.shape.as_list())
-    print('input_mask shape:', input_mask.shape.as_list())
-    print('segment_ids shape:', segment_ids.shape.as_list())
-
-    bert_config = modeling.BertConfig.from_json_file(FLAGS.bert_config_file)
-
-    is_training = False
-
-
-    model_old = modeling_old.BertModel(
-        config=bert_config,
-        is_training=is_training,
-        input_ids=input_ids,
-        input_mask=input_mask,
-        token_type_ids=segment_ids,
-        use_one_hot_embeddings=False)
-
-    #print(model_old)
-    #print(model_old.embedding_table)
-
-    output_old = modeling_old.check_output
-    print("Output in old model:", output_old)
-
-    model_new = modeling.BertModel(
-        config=bert_config,
-        is_training=is_training,
-        input_ids=input_ids,
-        input_mask=input_mask,
-        token_type_ids=segment_ids,
-        use_one_hot_embeddings=False)
-
-    #print(model_new)
-
-    # Copy embedding layer weights from old to new
-    #print(model_new._embedding_layer._word_embedding_table)
-    model_new._embedding_layer._word_embedding_table = modeling_old.embedding_table
-    model_new._embedding_layer._token_type_table = modeling_old.token_type_table
-    model_new._embedding_layer._position_embedding_table = modeling_old.full_position_embeddings
-    #print(model_new._embedding_layer._word_embedding_table)
-
-    # Copy attention layer weights from old to new
-    #print(modeling_old.query_layer_objs)
-    model_new._encoder_layers[0]._blocks['attention']._query_layer.kernel = modeling_old.query_layer_objs[0].kernel
-    model_new._encoder_layers[0]._blocks['attention']._query_layer.bias = modeling_old.query_layer_objs[0].bias
-    #print(modeling_old.key_layer_objs)
-    model_new._encoder_layers[0]._blocks['attention']._key_layer.kernel = modeling_old.key_layer_objs[0].kernel
-    model_new._encoder_layers[0]._blocks['attention']._key_layer.bias = modeling_old.key_layer_objs[0].bias
-    #print(modeling_old.value_layer_objs)
-    model_new._encoder_layers[0]._blocks['attention']._value_layer.kernel = modeling_old.value_layer_objs[0].kernel
-    model_new._encoder_layers[0]._blocks['attention']._value_layer.bias = modeling_old.value_layer_objs[0].bias
-
-    # Copy attention output weights from old to new
-    model_new._encoder_layers[0]._blocks['attention_output'].kernel = modeling_old.attention_output_objs[0].kernel
-    model_new._encoder_layers[0]._blocks['attention_output'].bias = modeling_old.attention_output_objs[0].bias
-
-    # Copy ffn filer weights from old to new
-    model_new._encoder_layers[0]._blocks['ffn_filter'].kernel = modeling_old.intermediate_output_objs[0].kernel
-    model_new._encoder_layers[0]._blocks['ffn_filter'].bias = modeling_old.intermediate_output_objs[0].bias
-
-    # Copy ffn output weights from old to new
-    model_new._encoder_layers[0]._blocks['ffn_output'].kernel = modeling_old.output_objs[0].kernel
-    model_new._encoder_layers[0]._blocks['ffn_output'].bias = modeling_old.output_objs[0].bias
-
-    # Copy pooler weights from old to new
-    model_new._pooler_layer._pooler_dense.kernel = modeling_old.pooler_obj.kernel
-    model_new._pooler_layer._pooler_dense.bias = modeling_old.pooler_obj.bias
-
-    attention_output = model_new._embedding_layer.call(input_ids, segment_ids)
-    encoder_output = model_new._encoder_layers[0].call(attention_output, input_mask)
-    pooler_output = model_new._pooler_layer.call(encoder_output)
-
-    output_new = modeling.check_output_new
-    print("Output in new model:", output_new)
-
-    std = tf.math.reduce_std(output_new - output_old)
-    print("Standard Deviation:", std)
-
-    # tvar = tf.compat.v1.trainable_variables()
-    # print(tvar)
-
-    #test = tf.compat.v1.get_default_graph().get_tensor_by_name("bert/embeddings/word_embeddings:0")
-    # graph = tf.compat.v1.get_default_graph()
-
-    # print(graph.collections)
-    # print(graph.get_collection('variables'))
-    # print(graph.get_collection('local_variables'))
-    # print(graph.get_collection('trainable_variables'))
-    # test = tf.compat.v1.get_default_graph().collections['variables']
-    # print(test)
-
-  return
-
   if not FLAGS.do_train and not FLAGS.do_eval:
     raise ValueError("At least one of `do_train` or `do_eval` must be True.")
 
@@ -597,7 +461,9 @@ def main(_):
 
   tf.io.gfile.makedirs(FLAGS.output_dir)
 
-
+  input_files = []
+  for input_pattern in FLAGS.input_file.split(","):
+    input_files.extend(tf.io.gfile.glob(input_pattern))
 
   logging.info("*** Input Files ***")
   for input_file in input_files:

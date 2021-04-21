@@ -2,7 +2,7 @@
 
 # The following may be modified
 # Model can be "bert_large" or "bert_base"
-MODEL="bert_large"
+MODEL="bert_test"
 # Sequence length can be 128, 256, 512, or other number of choice
 SEQ=128
 # Batch size can be anything that fits the GPU
@@ -121,18 +121,18 @@ python3 $CODE_DIR_INSIDE/run_matchtest.py \
   2>&1 | tee $TRAIN_DIR/$OUTPUT_FILE_REL
 
 # Calculate performance metrics
-echo 
-echo "=== Training Performance ==="
-if [ ! -f "$OUTPUT_FILE" ]; then
-  docker exec $CTNRNAME \
-  python3 $CODE_DIR_INSIDE/scripts/calc_performance_metrics.py \
-    $TRAIN_DIR_INSIDE/$OUTPUT_FILE_REL $SEQ $BATCH
-fi
+# echo 
+# echo "=== Training Performance ==="
+# if [ ! -f "$OUTPUT_FILE" ]; then
+#   docker exec $CTNRNAME \
+#   python3 $CODE_DIR_INSIDE/scripts/calc_performance_metrics.py \
+#     $TRAIN_DIR_INSIDE/$OUTPUT_FILE_REL $SEQ $BATCH
+# fi
 
 # Cleaning up
 echo 
 echo "=== Cleaning up ==="
 echo "Delete folder holding training data"
-docker exec $CTNRNAME rm -rf $TRAIN_DIR_INSIDE
+#docker exec $CTNRNAME rm -rf $TRAIN_DIR_INSIDE
 echo -n "Stopping "
 docker stop $CTNRNAME

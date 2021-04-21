@@ -26,8 +26,26 @@ import re
 import numpy as np
 import six
 import tensorflow as tf
-tf.compat.v1.disable_eager_execution()
+#tf.compat.v1.disable_eager_execution()
 
+# Checked Output
+check_output = None
+
+# Embedding Layer Weights
+embedding_table = None
+token_type_table = None
+full_position_embeddings = None
+
+# Transformer Layer Objects
+query_layer_objs = []
+key_layer_objs = []
+value_layer_objs = []
+attention_output_objs = []
+intermediate_output_objs = []
+output_objs = []
+
+# Pooler Layer Object
+pooler_obj = None
 
 class BertConfig(object):
   """Configuration for `BertModel`."""
@@ -226,11 +244,19 @@ class BertModel(object):
         # We "pool" the model by simply taking the hidden state corresponding
         # to the first token. We assume that this has been pre-trained
         first_token_tensor = tf.squeeze(self.sequence_output[:, 0:1, :], axis=1)
-        self.pooled_output = tf.compat.v1.layers.dense(
-            first_token_tensor,
+        # self.pooled_output = tf.compat.v1.layers.dense(
+        #     first_token_tensor,
+        #     config.hidden_size,
+        #     activation=tf.tanh,
+        #     kernel_initializer=create_initializer(config.initializer_range))
+        global pooler_obj
+        pooler_obj = tf.compat.v1.layers.Dense(
             config.hidden_size,
             activation=tf.tanh,
             kernel_initializer=create_initializer(config.initializer_range))
+        self.pooled_output = pooler_obj.apply(first_token_tensor)
+        global check_output
+        check_output = self.pooled_output
 
   def get_pooled_output(self):
     return self.pooled_output
@@ -411,6 +437,7 @@ def embedding_lookup(input_ids,
   if input_ids.shape.ndims == 2:
     input_ids = tf.expand_dims(input_ids, axis=[-1])
 
+  global embedding_table
   embedding_table = tf.compat.v1.get_variable(
       name=word_embedding_name,
       shape=[vocab_size, embedding_size],
@@ -473,6 +500,9 @@ def embedding_postprocessor(input_tensor,
   width = input_shape[2]
 
   output = input_tensor
+
+  global token_type_table
+  global full_position_embeddings
 
   if use_token_type:
     if token_type_ids is None:
@@ -667,29 +697,52 @@ def attention_layer(from_tensor,
   from_tensor_2d = reshape_to_matrix(from_tensor)
   to_tensor_2d = reshape_to_matrix(to_tensor)
 
+  global query_layer_objs, key_layer_objs,value_layer_objs
+
   # `query_layer` = [B*F, N*H]
-  query_layer = tf.compat.v1.layers.dense(
-      from_tensor_2d,
+  # query_layer = tf.compat.v1.layers.dense(
+  #     from_tensor_2d,
+  #     num_attention_heads * size_per_head,
+  #     activation=query_act,
+  #     name="query",
+  #     kernel_initializer=create_initializer(initializer_range))
+  query_layer_obj = tf.compat.v1.layers.Dense(
       num_attention_heads * size_per_head,
       activation=query_act,
       name="query",
       kernel_initializer=create_initializer(initializer_range))
+  query_layer = query_layer_obj.apply(from_tensor_2d)
+  query_layer_objs.append(query_layer_obj)
 
   # `key_layer` = [B*T, N*H]
-  key_layer = tf.compat.v1.layers.dense(
-      to_tensor_2d,
+  # key_layer = tf.compat.v1.layers.dense(
+  #     to_tensor_2d,
+  #     num_attention_heads * size_per_head,
+  #     activation=key_act,
+  #     name="key",
+  #     kernel_initializer=create_initializer(initializer_range))
+  key_layer_obj = tf.compat.v1.layers.Dense(
       num_attention_heads * size_per_head,
       activation=key_act,
       name="key",
       kernel_initializer=create_initializer(initializer_range))
+  key_layer = key_layer_obj.apply(to_tensor_2d)
+  key_layer_objs.append(key_layer_obj)
 
   # `value_layer` = [B*T, N*H]
-  value_layer = tf.compat.v1.layers.dense(
-      to_tensor_2d,
+  # value_layer = tf.compat.v1.layers.dense(
+  #     to_tensor_2d,
+  #     num_attention_heads * size_per_head,
+  #     activation=value_act,
+  #     name="value",
+  #     kernel_initializer=create_initializer(initializer_range))
+  value_layer_obj = tf.compat.v1.layers.Dense(
       num_attention_heads * size_per_head,
       activation=value_act,
       name="value",
       kernel_initializer=create_initializer(initializer_range))
+  value_layer = value_layer_obj.apply(to_tensor_2d)
+  value_layer_objs.append(value_layer_obj)
 
   # `query_layer` = [B, N, F, H]
   query_layer = transpose_for_scores(query_layer, batch_size,
@@ -827,6 +880,9 @@ def transformer_model(input_tensor,
   # help the optimizer.
   prev_output = reshape_to_matrix(input_tensor)
 
+  global attention_output_objs, intermediate_output_objs, output_objs
+  global check_output
+
   all_layer_outputs = []
   for layer_idx in range(num_hidden_layers):
     with tf.compat.v1.variable_scope("layer_%d" % layer_idx):
@@ -860,27 +916,43 @@ def transformer_model(input_tensor,
         # Run a linear projection of `hidden_size` then add a residual
         # with `layer_input`.
         with tf.compat.v1.variable_scope("output"):
-          attention_output = tf.compat.v1.layers.dense(
-              attention_output,
+          # attention_output = tf.compat.v1.layers.dense(
+          #     attention_output,
+          #     hidden_size,
+          #     kernel_initializer=create_initializer(initializer_range))
+          attention_output_obj = tf.compat.v1.layers.Dense(
               hidden_size,
               kernel_initializer=create_initializer(initializer_range))
+          attention_output = attention_output_obj.apply(attention_output)
+          attention_output_objs.append(attention_output_obj)
           attention_output = dropout(attention_output, hidden_dropout_prob)
           attention_output = layer_norm(attention_output + layer_input)
 
       # The activation is only applied to the "intermediate" hidden layer.
       with tf.compat.v1.variable_scope("intermediate"):
-        intermediate_output = tf.compat.v1.layers.dense(
-            attention_output,
+        # intermediate_output = tf.compat.v1.layers.dense(
+        #     attention_output,
+        #     intermediate_size,
+        #     activation=intermediate_act_fn,
+        #     kernel_initializer=create_initializer(initializer_range))
+        intermediate_output_obj = tf.compat.v1.layers.Dense(
             intermediate_size,
             activation=intermediate_act_fn,
             kernel_initializer=create_initializer(initializer_range))
+        intermediate_output = intermediate_output_obj.apply(attention_output)
+        intermediate_output_objs.append(intermediate_output_obj)
 
       # Down-project back to `hidden_size` then add the residual.
       with tf.compat.v1.variable_scope("output"):
-        layer_output = tf.compat.v1.layers.dense(
-            intermediate_output,
+        # layer_output = tf.compat.v1.layers.dense(
+        #     intermediate_output,
+        #     hidden_size,
+        #     kernel_initializer=create_initializer(initializer_range))
+        layer_output_obj = tf.compat.v1.layers.Dense(
             hidden_size,
             kernel_initializer=create_initializer(initializer_range))
+        layer_output = layer_output_obj.apply(intermediate_output)
+        output_objs.append(layer_output_obj)
         layer_output = dropout(layer_output, hidden_dropout_prob)
         layer_output = layer_norm(layer_output + attention_output)
         prev_output = layer_output
@@ -912,7 +984,7 @@ def get_shape_list(tensor, expected_rank=None, name=None):
     be returned as python integers, and dynamic dimensions will be returned
     as tf.Tensor scalars.
   """
-  if name is None:
+  if name is None and not tf.executing_eagerly():
     name = tensor.name
 
   if expected_rank is not None:
@@ -972,7 +1044,7 @@ def assert_rank(tensor, expected_rank, name=None):
   Raises:
     ValueError: If the expected shape doesn't match the actual shape.
   """
-  if name is None:
+  if name is None and not tf.executing_eagerly():
     name = tensor.name
 
   expected_rank_dict = {}

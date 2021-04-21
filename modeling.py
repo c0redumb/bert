@@ -28,6 +28,8 @@ import six
 import tensorflow as tf
 # tf.compat.v1.disable_eager_execution()
 
+from absl import logging
+check_output_new = None
 
 class BertConfig(object):
     """Configuration for `BertModel`."""
@@ -158,10 +160,12 @@ class BertModel(object):
             config.hidden_dropout_prob = 0.0
             config.attention_probs_dropout_prob = 0.0
 
-        # input_shape = get_shape_list(input_ids, expected_rank=2)
-        # batch_size = input_shape[0]
-        # seq_length = input_shape[1]
-        # # print(input_shape)
+        input_shape = get_shape_list(input_ids, expected_rank=2)
+        batch_size = input_shape[0]
+        seq_length = input_shape[1]
+        logging.info('Shape of input_ids: %s', input_shape)
+        logging.info('        batch_size: %s', batch_size)
+        logging.info('        seq_length: %s', seq_length)
 
         if input_mask is None:
             input_mask = tf.ones(
@@ -580,6 +584,9 @@ class Pooler(tf.keras.layers.Layer):
         first_token_tensor = tf.squeeze(input_tensor[:, 0:1, :], axis=1)
         output = self._pooler_dense(first_token_tensor)
 
+        global check_output_new
+        check_output_new = output
+
         return output
 
 
@@ -724,8 +731,17 @@ class Attention(tf.keras.layers.Layer):
 
         # Calculate context
         value_layer = tf.reshape(value_layer, [B, T, N, H])
-        context_layer = tf.einsum(
-            'BNFT,BTNH->BFNH', attention_probs, value_layer)
+
+        # context_layer = tf.einsum(
+        #     'BNFT,BTNH->BFNH', attention_probs, value_layer)
+
+        # `value_layer` = [B, N, T, H]
+        value_layer = tf.transpose(a=value_layer, perm=[0, 2, 1, 3])
+        # `context_layer` = [B, N, F, H]
+        context_layer = tf.matmul(attention_probs, value_layer)
+        # `context_layer` = [B, F, N, H]
+        context_layer = tf.transpose(a=context_layer, perm=[0, 2, 1, 3])
+
         context_layer = tf.reshape(context_layer, [B, F, N*H])
 
         return context_layer
@@ -815,9 +831,9 @@ class TransformerEncoder(tf.keras.layers.Layer):
         blocks['attention'] = Attention(
             num_attention_heads=self._num_attention_heads,
             size_per_head=self._size_per_head,
-            query_act_fn='gelu',
-            key_act_fn='gelu',
-            value_act_fn='gelu',
+            # query_act_fn='gelu',
+            # key_act_fn='gelu',
+            # value_act_fn='gelu',
             init_range=self._init_range,
             dropout=self._attn_probs_dropout_prob,
             name="attn")
@@ -954,7 +970,7 @@ def get_shape_list(tensor, expected_rank=None, name=None):
       be returned as python integers, and dynamic dimensions will be returned
       as tf.Tensor scalars.
     """
-    if name is None:
+    if name is None and not tf.executing_eagerly():
         name = tensor.name
 
     if expected_rank is not None:
@@ -987,7 +1003,7 @@ def assert_rank(tensor, expected_rank, name=None):
     Raises:
       ValueError: If the expected shape doesn't match the actual shape.
     """
-    if name is None:
+    if name is None and not tf.executing_eagerly():
         name = tensor.name
 
     expected_rank_dict = {}
