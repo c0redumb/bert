@@ -263,126 +263,126 @@ class BertModel(object):
         return self.embedding_table
 
 
-def gelu(x):
-    """Gaussian Error Linear Unit.
+# def gelu(x):
+#     """Gaussian Error Linear Unit.
 
-    This is a smoother version of the RELU.
-    Original paper: https://arxiv.org/abs/1606.08415
-    Args:
-      x: float Tensor to perform activation.
+#     This is a smoother version of the RELU.
+#     Original paper: https://arxiv.org/abs/1606.08415
+#     Args:
+#       x: float Tensor to perform activation.
 
-    Returns:
-      `x` with the GELU activation applied.
-    """
-    try:
-        return tf.nn.gelu(x)
-    except:
-        cdf = 0.5 * (1.0 + tf.tanh(
-            (np.sqrt(2 / np.pi) * (x + 0.044715 * tf.pow(x, 3)))))
-        return x * cdf
-
-
-def get_activation(activation_string):
-    """Maps a string to a Python function, e.g., "relu" => `tf.nn.relu`.
-
-    Args:
-      activation_string: String name of the activation function.
-
-    Returns:
-      A Python function corresponding to the activation function. If
-      `activation_string` is None, empty, or "linear", this will return None.
-      If `activation_string` is not a string, it will return `activation_string`.
-
-    Raises:
-      ValueError: The `activation_string` does not correspond to a known
-        activation.
-    """
-
-    # We assume that anything that"s not a string is already an activation
-    # function, so we just return it.
-    if not isinstance(activation_string, six.string_types):
-        return activation_string
-
-    if not activation_string:
-        return None
-
-    act = activation_string.lower()
-    if act == "linear":
-        return None
-    elif act == "relu":
-        return tf.nn.relu
-    elif act == "gelu":
-        return gelu
-    elif act == "tanh":
-        return tf.tanh
-    else:
-        raise ValueError("Unsupported activation: %s" % act)
+#     Returns:
+#       `x` with the GELU activation applied.
+#     """
+#     try:
+#         return tf.nn.gelu(x)
+#     except:
+#         cdf = 0.5 * (1.0 + tf.tanh(
+#             (np.sqrt(2 / np.pi) * (x + 0.044715 * tf.pow(x, 3)))))
+#         return x * cdf
 
 
-def get_assignment_map_from_checkpoint(tvars, init_checkpoint):
-    """Compute the union of the current variables and checkpoint variables."""
-    assignment_map = {}
-    initialized_variable_names = {}
+# def get_activation(activation_string):
+#     """Maps a string to a Python function, e.g., "relu" => `tf.nn.relu`.
 
-    name_to_variable = collections.OrderedDict()
-    for var in tvars:
-        name = var.name
-        m = re.match("^(.*):\\d+$", name)
-        if m is not None:
-            name = m.group(1)
-        name_to_variable[name] = var
+#     Args:
+#       activation_string: String name of the activation function.
 
-    init_vars = tf.train.list_variables(init_checkpoint)
+#     Returns:
+#       A Python function corresponding to the activation function. If
+#       `activation_string` is None, empty, or "linear", this will return None.
+#       If `activation_string` is not a string, it will return `activation_string`.
 
-    assignment_map = collections.OrderedDict()
-    for x in init_vars:
-      (name, var) = (x[0], x[1])
-      if name not in name_to_variable:
-        continue
-      #assignment_map[name] = name
-      assignment_map[name] = name_to_variable[name]
-      initialized_variable_names[name] = 1
-      initialized_variable_names[name + ":0"] = 1
+#     Raises:
+#       ValueError: The `activation_string` does not correspond to a known
+#         activation.
+#     """
 
-    return (assignment_map, initialized_variable_names)
+#     # We assume that anything that"s not a string is already an activation
+#     # function, so we just return it.
+#     if not isinstance(activation_string, six.string_types):
+#         return activation_string
 
+#     if not activation_string:
+#         return None
 
-def dropout(input_tensor, dropout_prob):
-    """Perform dropout.
-
-    Args:
-      input_tensor: float Tensor.
-      dropout_prob: Python float. The probability of dropping out a value (NOT of
-        *keeping* a dimension as in `tf.nn.dropout`).
-
-    Returns:
-      A version of `input_tensor` with dropout applied.
-    """
-    if dropout_prob is None or dropout_prob == 0.0:
-        return input_tensor
-
-    output = tf.nn.dropout(input_tensor, 1 - (1.0 - dropout_prob))
-    return output
+#     act = activation_string.lower()
+#     if act == "linear":
+#         return None
+#     elif act == "relu":
+#         return tf.nn.relu
+#     elif act == "gelu":
+#         return gelu
+#     elif act == "tanh":
+#         return tf.tanh
+#     else:
+#         raise ValueError("Unsupported activation: %s" % act)
 
 
-def layer_norm(input_tensor, name=None):
-    """Run layer normalization on the last dimension of the tensor."""
-    # return tf.contrib.layers.layer_norm(
-    #     inputs=input_tensor, begin_norm_axis=-1, begin_params_axis=-1, scope=name)
-    return tf.keras.layers.LayerNormalization(axis=-1, epsilon=1e-12)(inputs=input_tensor)
+# def get_assignment_map_from_checkpoint(tvars, init_checkpoint):
+#     """Compute the union of the current variables and checkpoint variables."""
+#     assignment_map = {}
+#     initialized_variable_names = {}
+
+#     name_to_variable = collections.OrderedDict()
+#     for var in tvars:
+#         name = var.name
+#         m = re.match("^(.*):\\d+$", name)
+#         if m is not None:
+#             name = m.group(1)
+#         name_to_variable[name] = var
+
+#     init_vars = tf.train.list_variables(init_checkpoint)
+
+#     assignment_map = collections.OrderedDict()
+#     for x in init_vars:
+#       (name, var) = (x[0], x[1])
+#       if name not in name_to_variable:
+#         continue
+#       #assignment_map[name] = name
+#       assignment_map[name] = name_to_variable[name]
+#       initialized_variable_names[name] = 1
+#       initialized_variable_names[name + ":0"] = 1
+
+#     return (assignment_map, initialized_variable_names)
 
 
-def layer_norm_and_dropout(input_tensor, dropout_prob, name=None):
-    """Runs layer normalization followed by dropout."""
-    output_tensor = layer_norm(input_tensor, name)
-    output_tensor = dropout(output_tensor, dropout_prob)
-    return output_tensor
+# def dropout(input_tensor, dropout_prob):
+#     """Perform dropout.
+
+#     Args:
+#       input_tensor: float Tensor.
+#       dropout_prob: Python float. The probability of dropping out a value (NOT of
+#         *keeping* a dimension as in `tf.nn.dropout`).
+
+#     Returns:
+#       A version of `input_tensor` with dropout applied.
+#     """
+#     if dropout_prob is None or dropout_prob == 0.0:
+#         return input_tensor
+
+#     output = tf.nn.dropout(input_tensor, 1 - (1.0 - dropout_prob))
+#     return output
 
 
-def create_initializer(initializer_range=0.02):
-    """Creates a `truncated_normal_initializer` with the given range."""
-    # return tf.compat.v1.truncated_normal_initializer(stddev=initializer_range)
-    return tf.keras.initializers.TruncatedNormal(stddev=initializer_range)
+# def layer_norm(input_tensor, name=None):
+#     """Run layer normalization on the last dimension of the tensor."""
+#     # return tf.contrib.layers.layer_norm(
+#     #     inputs=input_tensor, begin_norm_axis=-1, begin_params_axis=-1, scope=name)
+#     return tf.keras.layers.LayerNormalization(axis=-1, epsilon=1e-12)(inputs=input_tensor)
+
+
+# def layer_norm_and_dropout(input_tensor, dropout_prob, name=None):
+#     """Runs layer normalization followed by dropout."""
+#     output_tensor = layer_norm(input_tensor, name)
+#     output_tensor = dropout(output_tensor, dropout_prob)
+#     return output_tensor
+
+
+# def create_initializer(initializer_range=0.02):
+#     """Creates a `truncated_normal_initializer` with the given range."""
+#     # return tf.compat.v1.truncated_normal_initializer(stddev=initializer_range)
+#     return tf.keras.initializers.TruncatedNormal(stddev=initializer_range)
 
 
 class Embedding(tf.keras.layers.Layer):
