@@ -2,7 +2,7 @@
 
 # The following may be modified
 # Model can be "bert_large" or "bert_base"
-MODEL="bert_test"
+MODEL="bert_large"
 # Sequence length can be 128, 256, 512, or other number of choice
 SEQ=128
 # Batch size can be anything that fits the GPU
@@ -11,21 +11,21 @@ BATCH=8
 # Container image used
 IMAGE="rocm/tensorflow:rocm3.5-tf2.2-dev"
 
-# # Print a message
-# echo "This script will run the $MODEL model in a ROCm container."
-# echo "Below is what it will do:"
-# echo "  1. Pull the latest ROCm docker image;"
-# echo "  2. Prepare a sample traing data set in a temporary directory;"
-# echo "  3. Train $MODEL inside the ROCm container;"
-# echo "  4. Clean up the temoprary directory created and exit."
-# echo "Please press any key to start, or ESC to exit."
+# Print a message
+echo "This script will run the $MODEL model in a ROCm container."
+echo "Below is what it will do:"
+echo "  1. Pull the latest ROCm docker image;"
+echo "  2. Prepare a sample traing data set in a temporary directory;"
+echo "  3. Train $MODEL inside the ROCm container;"
+echo "  4. Clean up the temoprary directory created and exit."
+echo "Please press any key to start, or ESC to exit."
 
-# # Read a key press
-# read -n 1 -s KEY
-# if [ "$KEY" == $'\e' ] ; then
-#   echo "Exit. Did nothing."
-#   exit 0
-# fi
+# Read a key press
+read -n 1 -s KEY
+if [ "$KEY" == $'\e' ] ; then
+  echo "Exit. Did nothing."
+  exit 0
+fi
 
 # Get the folders
 SCRIPTPATH=$(dirname $(realpath $0))
@@ -106,7 +106,7 @@ LEARNING_RATE=2e-5
 # export HIP_VISIBLE_DEVICES=0 # choose gpu
 # run pretraining
 docker exec $CTNRNAME \
-python3 $CODE_DIR_INSIDE/run_matchtest.py \
+python3 $CODE_DIR_INSIDE/run_pretraining_notpu.py \
   --input_file=$TRAIN_DIR_INSIDE/$DATA_TFRECORD \
   --output_dir=$TRAIN_DIR_INSIDE/$CUR_TRAINING \
   --do_train=True \
@@ -121,13 +121,13 @@ python3 $CODE_DIR_INSIDE/run_matchtest.py \
   2>&1 | tee $TRAIN_DIR/$OUTPUT_FILE_REL
 
 # Calculate performance metrics
-# echo 
-# echo "=== Training Performance ==="
-# if [ ! -f "$OUTPUT_FILE" ]; then
-#   docker exec $CTNRNAME \
-#   python3 $CODE_DIR_INSIDE/scripts/calc_performance_metrics.py \
-#     $TRAIN_DIR_INSIDE/$OUTPUT_FILE_REL $SEQ $BATCH
-# fi
+echo 
+echo "=== Training Performance ==="
+if [ ! -f "$OUTPUT_FILE" ]; then
+  docker exec $CTNRNAME \
+  python3 $CODE_DIR_INSIDE/scripts/calc_performance_metrics.py \
+    $TRAIN_DIR_INSIDE/$OUTPUT_FILE_REL $SEQ $BATCH
+fi
 
 # Cleaning up
 echo 

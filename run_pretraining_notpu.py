@@ -1,4 +1,19 @@
 # coding=utf-8
+# Copyright 2018 The Google AI Language Team Authors.
+# Copyright 2020 AMD MLSE Team Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+"""Pretraining BERT models"""
 
 from __future__ import absolute_import
 from __future__ import division
@@ -9,7 +24,7 @@ import modeling
 #import modeling_old as modeling
 import optimization
 import tensorflow as tf
-tf.compat.v1.disable_eager_execution()
+#tf.compat.v1.disable_eager_execution()
 
 import time
 from tensorflow.python.training.summary_io import SummaryWriterCache
@@ -131,10 +146,10 @@ class LogSessionRunHook(tf.estimator.SessionRunHook):
 def model_fn_builder(bert_config, init_checkpoint, learning_rate,
                      num_train_steps, num_warmup_steps, use_tpu,
                      use_one_hot_embeddings, use_hvd, use_amp):
-  """Returns `model_fn` closure for TPUEstimator."""
+  """Returns `model_fn` closure for Estimator."""
 
   def model_fn(features, labels, mode, params):  # pylint: disable=unused-argument
-    """The `model_fn` for TPUEstimator."""
+    """The `model_fn` for Estimator."""
 
     logging.info("*** Features ***")
     for name in sorted(features.keys()):
@@ -150,13 +165,16 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
 
     is_training = (mode == tf.estimator.ModeKeys.TRAIN)
 
-    model = modeling.BertModel(
-        config=bert_config,
-        is_training=is_training,
-        input_ids=input_ids,
-        input_mask=input_mask,
-        token_type_ids=segment_ids,
-        use_one_hot_embeddings=use_one_hot_embeddings)
+    # model = modeling.BertModel(
+    #     config=bert_config,
+    #     is_training=is_training,
+    #     input_ids=input_ids,
+    #     input_mask=input_mask,
+    #     token_type_ids=segment_ids,
+    #     #use_one_hot_embeddings=use_one_hot_embeddings
+    #     )
+    model = modeling.BertLayer(config=bert_config)
+    model_output = model([input_ids, input_mask, segment_ids])
 
     (masked_lm_loss,
      masked_lm_example_loss, masked_lm_log_probs) = get_masked_lm_output(
@@ -173,23 +191,15 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
     next_sentence_loss = tf.identity(next_sentence_loss, name='nsp_loss')
     total_loss = tf.identity(total_loss, name='total_loss')
 
+    # TODO: Convert model loading to TF2
     tvars = tf.compat.v1.trainable_variables()
 
     initialized_variable_names = {}
-    scaffold_fn = None
     if init_checkpoint and (hvd == None or hvd.rank() == 0):
       logging.info("**** Init Checkpoint {} {} ****".format(hvd.rank(), init_checkpoint))
-      (assignment_map, initialized_variable_names
-      ) = modeling.get_assignment_map_from_checkpoint(tvars, init_checkpoint)
-      if use_tpu:
-
-        def tpu_scaffold():
-          tf.compat.v1.train.init_from_checkpoint(init_checkpoint, assignment_map)
-          return tf.compat.v1.train.Scaffold()
-
-        scaffold_fn = tpu_scaffold
-      else:
-        tf.compat.v1.train.init_from_checkpoint(init_checkpoint, assignment_map)
+      (assignment_map, initialized_variable_names) = \
+        modeling.get_assignment_map_from_checkpoint(tvars, init_checkpoint)
+      tf.compat.v1.train.init_from_checkpoint(init_checkpoint, assignment_map)
 
     logging.info("**** Trainable Variables ****")
     for var in tvars:
@@ -206,18 +216,11 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
       train_op = optimization.create_optimizer(
           total_loss, learning_rate, num_train_steps, num_warmup_steps, use_tpu, use_hvd, 'adam', use_amp)
 
-      # output_spec = tf.compat.v1.estimator.tpu.TPUEstimatorSpec(
-      #     mode=mode,
-      #     loss=total_loss,
-      #     train_op=train_op,
-      #     scaffold_fn=scaffold_fn)
-      output_spec = tf.compat.v1.estimator.EstimatorSpec(
+      output_spec = tf.estimator.EstimatorSpec(
           mode=mode,
           loss=total_loss,
-          train_op=train_op,
-          scaffold=scaffold_fn)
+          train_op=train_op)
     elif mode == tf.estimator.ModeKeys.EVAL:
-
       def metric_fn(masked_lm_example_loss, masked_lm_log_probs, masked_lm_ids,
                     masked_lm_weights, next_sentence_example_loss,
                     next_sentence_log_probs, next_sentence_labels):
@@ -253,20 +256,9 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
             "next_sentence_loss": next_sentence_mean_loss,
         }
 
-      eval_metrics = (metric_fn, [
-          masked_lm_example_loss, masked_lm_log_probs, masked_lm_ids,
-          masked_lm_weights, next_sentence_example_loss,
-          next_sentence_log_probs, next_sentence_labels
-      ])
-      # output_spec = tf.compat.v1.estimator.tpu.TPUEstimatorSpec(
-      #     mode=mode,
-      #     loss=total_loss,
-      #     eval_metrics=eval_metrics,
-      #     scaffold_fn=scaffold_fn)
-      output_spec = tf.compat.v1.estimator.EstimatorSpec(
+      output_spec = tf.estimator.EstimatorSpec(
           mode=mode,
           loss=total_loss,
-          # eval_metrics=eval_metrics,
           eval_metric_ops=metric_fn(
             masked_lm_example_loss=masked_lm_example_loss,
             masked_lm_log_probs=masked_lm_log_probs,
@@ -275,8 +267,7 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
             next_sentence_example_loss=next_sentence_example_loss,
             next_sentence_log_probs=next_sentence_log_probs,
             next_sentence_labels=next_sentence_labels
-          ),
-          scaffold=scaffold_fn)
+          ))
     else:
       raise ValueError("Only TRAIN and EVAL modes are supported: %s" % (mode))
 
@@ -284,7 +275,7 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
 
   return model_fn
 
-
+# TODO: Change this lm part to Keras layers
 def get_masked_lm_output(bert_config, input_tensor, output_weights, positions,
                          label_ids, label_weights):
   """Get loss and log probs for the masked LM."""
@@ -469,23 +460,6 @@ def main(_):
   for input_file in input_files:
     logging.info("  %s" % input_file)
 
-  # run_config = tf.compat.v1.estimator.tpu.RunConfig(
-  #     # cluster=tpu_cluster_resolver,
-  #     # master=FLAGS.master,
-  #     model_dir=FLAGS.output_dir,
-  #     save_checkpoints_steps=FLAGS.save_checkpoints_steps,
-  #     # tpu_config=tf.compat.v1.estimator.tpu.TPUConfig(
-  #     #     iterations_per_loop=FLAGS.iterations_per_loop,
-  #     #     num_shards=FLAGS.num_tpu_cores,
-  #     #     per_host_input_for_training=is_per_host),
-  #     tpu_config=tf.compat.v1.estimator.tpu.TPUConfig(
-  #         iterations_per_loop=FLAGS.iterations_per_loop,
-  #         num_shards=None,
-  #         per_host_input_for_training=tf.compat.v1.estimator.tpu.InputPipelineConfig.PER_HOST_V2),
-  #     # log_step_count_steps=FLAGS.num_report_steps * FLAGS.iterations_per_loop,
-  #     log_step_count_steps=FLAGS.iterations_per_loop,
-  # )
-
   run_config = tf.estimator.RunConfig(
     tf_random_seed=54321,
     model_dir=FLAGS.output_dir,
@@ -503,15 +477,6 @@ def main(_):
       use_one_hot_embeddings=False,
       use_hvd=False,
       use_amp=False)
-
-  # If TPU is not available, this will fall back to normal Estimator on CPU
-  # or GPU.
-  # estimator = tf.compat.v1.estimator.tpu.TPUEstimator(
-  #     use_tpu=False,
-  #     model_fn=model_fn,
-  #     config=run_config,
-  #     train_batch_size=FLAGS.train_batch_size,
-  #     eval_batch_size=FLAGS.eval_batch_size)
 
   params = {
     'batch_size': FLAGS.train_batch_size

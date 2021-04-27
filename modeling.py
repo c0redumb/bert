@@ -1,5 +1,6 @@
 # coding=utf-8
 # Copyright 2018 The Google AI Language Team Authors.
+# Copyright 2020 AMD MLSE Team Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,7 +13,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""The main BERT model and related functions."""
+"""The main BERT model and related functions"""
 
 from __future__ import absolute_import
 from __future__ import division
@@ -107,6 +108,145 @@ class BertConfig(object):
         return json.dumps(self.to_dict(), indent=2, sort_keys=True) + "\n"
 
 
+class BertLayer(tf.keras.Model):
+    """BERT model in a layer ("Bidirectional Encoder Representations from Transformers").
+
+    This layer include the BERT model.
+    """
+
+    def __init__(self,
+                 config,
+                #  seq_length=128,
+                #  batch_size=1,
+                 **kwargs):
+        """Initialized BERT Layer
+
+        Args:
+          config: BertConfig, the configuration of the model
+          seq_length: int, the sequence length
+          batch_size: int, the batch size
+
+        Raises:
+          ValueError: The config is invalid or one of the input tensor shapes
+            is invalid.
+        """
+        super(BertLayer, self).__init__(**kwargs)
+        self.config = config
+        # self.seq_length = seq_length
+        # self.batch_size = batch_size
+
+        # Embedding Layer
+        self._embedding_layer = Embedding(
+            embedding_size=config.hidden_size,
+            vocab_size=config.vocab_size,
+            token_type_vocab_size=config.type_vocab_size,
+            max_position_embeddings=config.max_position_embeddings,
+            init_range=config.initializer_range,
+            dropout_prob=config.hidden_dropout_prob,
+            name="embedding_layer"
+        )
+
+        # Encoder Layers
+        self._encoder_layers = [] 
+        for idx in range(config.num_hidden_layers):
+            encoder_layer = TransformerEncoder(
+                num_attention_heads=config.num_attention_heads,
+                hidden_size=config.hidden_size,
+                intermediate_size=config.intermediate_size,
+                intermediate_act_fn=config.hidden_act,
+                attn_probs_dropout_prob=config.attention_probs_dropout_prob,
+                other_dropout_prob=config.hidden_dropout_prob,
+                init_range=config.initializer_range,
+                name="encoder_layer_%d" % idx
+            )
+            self._encoder_layers.append(encoder_layer)
+
+        # Pooling Layer
+        self._pooler_layer = Pooler(
+            hidden_size=config.hidden_size,
+            act_fn="tanh",
+            init_range=config.initializer_range,
+            name="pooler_layer"
+        )
+
+    def call(self, inputs, training=None):
+        # inputs is [input_ids, input_mask, token_type_ids].
+        input_ids = inputs[0]
+        input_mask = inputs[1]
+        token_type_ids = inputs[2]
+
+        input_shape = get_shape_list(input_ids, expected_rank=2)
+        batch_size = input_shape[0]
+        seq_length = input_shape[1]
+
+        if input_mask is None:
+            input_mask = tf.ones(
+                shape=[batch_size, seq_length], dtype=tf.int32)
+
+        if token_type_ids is None:
+            token_type_ids = tf.zeros(
+                shape=[batch_size, seq_length], dtype=tf.int32)
+
+        # Embedding
+        self.embedding_output = self._embedding_layer(
+            input_ids, token_type_ids, training=training)
+        self.embedding_table = self._embedding_layer.get_embedding_table()
+
+        # This converts a 2D mask of shape [batch_size, seq_length] to a 3D
+        # mask of shape [batch_size, seq_length, seq_length] which is used
+        # for the attention scores.
+        attention_mask = create_attention_mask_from_input_mask(
+            input_ids, input_mask)
+
+        # Run the stacked transformer encoder
+        self.all_encoder_layers = []  # This holds the encoder layer outputs
+        layer_input = self.embedding_output
+        for idx in range(self.config.num_hidden_layers):
+            layer_output = self._encoder_layers[idx](layer_input,
+                                            attention_mask=attention_mask, training=training)
+            self.all_encoder_layers.append(layer_output)
+            layer_input = layer_output
+        self.sequence_output = self.all_encoder_layers[-1]
+
+        # The "pooler" converts the encoded sequence tensor of shape
+        # [batch_size, seq_length, hidden_size] to a tensor of shape
+        # [batch_size, hidden_size]. This is necessary for segment-level
+        # (or segment-pair-level) classification tasks where we need a fixed
+        # dimensional representation of the segment.
+        self.pooled_output = self._pooler_layer(self.sequence_output)
+
+        return self.pooled_output
+
+    def get_pooled_output(self):
+        return self.pooled_output
+
+    def get_sequence_output(self):
+        """Gets final hidden layer of encoder.
+
+        Returns:
+          float Tensor of shape [batch_size, seq_length, hidden_size] corresponding
+          to the final hidden of the transformer encoder.
+        """
+        return self.sequence_output
+
+    def get_all_encoder_layers(self):
+        return self.all_encoder_layers
+
+    def get_embedding_output(self):
+        """Gets output of the embedding lookup (i.e., input to the transformer).
+
+        Returns:
+          float Tensor of shape [batch_size, seq_length, hidden_size] corresponding
+          to the output of the embedding layer, after summing the word
+          embeddings with the positional embeddings and the token type embeddings,
+          then performing layer normalization. This is the input to the transformer.
+        """
+        return self.embedding_output
+
+    def get_embedding_table(self):
+        return self.embedding_table
+
+# TODO: Make BertModel a Keras model
 class BertModel(object):
     """BERT model ("Bidirectional Encoder Representations from Transformers").
 
@@ -137,7 +277,7 @@ class BertModel(object):
                  input_ids,
                  input_mask=None,
                  token_type_ids=None,
-                 use_one_hot_embeddings=False,
+                 #use_one_hot_embeddings=False,
                  scope=None):
         """Constructor for BertModel.
 
@@ -261,128 +401,6 @@ class BertModel(object):
 
     def get_embedding_table(self):
         return self.embedding_table
-
-
-# def gelu(x):
-#     """Gaussian Error Linear Unit.
-
-#     This is a smoother version of the RELU.
-#     Original paper: https://arxiv.org/abs/1606.08415
-#     Args:
-#       x: float Tensor to perform activation.
-
-#     Returns:
-#       `x` with the GELU activation applied.
-#     """
-#     try:
-#         return tf.nn.gelu(x)
-#     except:
-#         cdf = 0.5 * (1.0 + tf.tanh(
-#             (np.sqrt(2 / np.pi) * (x + 0.044715 * tf.pow(x, 3)))))
-#         return x * cdf
-
-
-# def get_activation(activation_string):
-#     """Maps a string to a Python function, e.g., "relu" => `tf.nn.relu`.
-
-#     Args:
-#       activation_string: String name of the activation function.
-
-#     Returns:
-#       A Python function corresponding to the activation function. If
-#       `activation_string` is None, empty, or "linear", this will return None.
-#       If `activation_string` is not a string, it will return `activation_string`.
-
-#     Raises:
-#       ValueError: The `activation_string` does not correspond to a known
-#         activation.
-#     """
-
-#     # We assume that anything that"s not a string is already an activation
-#     # function, so we just return it.
-#     if not isinstance(activation_string, six.string_types):
-#         return activation_string
-
-#     if not activation_string:
-#         return None
-
-#     act = activation_string.lower()
-#     if act == "linear":
-#         return None
-#     elif act == "relu":
-#         return tf.nn.relu
-#     elif act == "gelu":
-#         return gelu
-#     elif act == "tanh":
-#         return tf.tanh
-#     else:
-#         raise ValueError("Unsupported activation: %s" % act)
-
-
-# def get_assignment_map_from_checkpoint(tvars, init_checkpoint):
-#     """Compute the union of the current variables and checkpoint variables."""
-#     assignment_map = {}
-#     initialized_variable_names = {}
-
-#     name_to_variable = collections.OrderedDict()
-#     for var in tvars:
-#         name = var.name
-#         m = re.match("^(.*):\\d+$", name)
-#         if m is not None:
-#             name = m.group(1)
-#         name_to_variable[name] = var
-
-#     init_vars = tf.train.list_variables(init_checkpoint)
-
-#     assignment_map = collections.OrderedDict()
-#     for x in init_vars:
-#       (name, var) = (x[0], x[1])
-#       if name not in name_to_variable:
-#         continue
-#       #assignment_map[name] = name
-#       assignment_map[name] = name_to_variable[name]
-#       initialized_variable_names[name] = 1
-#       initialized_variable_names[name + ":0"] = 1
-
-#     return (assignment_map, initialized_variable_names)
-
-
-# def dropout(input_tensor, dropout_prob):
-#     """Perform dropout.
-
-#     Args:
-#       input_tensor: float Tensor.
-#       dropout_prob: Python float. The probability of dropping out a value (NOT of
-#         *keeping* a dimension as in `tf.nn.dropout`).
-
-#     Returns:
-#       A version of `input_tensor` with dropout applied.
-#     """
-#     if dropout_prob is None or dropout_prob == 0.0:
-#         return input_tensor
-
-#     output = tf.nn.dropout(input_tensor, 1 - (1.0 - dropout_prob))
-#     return output
-
-
-# def layer_norm(input_tensor, name=None):
-#     """Run layer normalization on the last dimension of the tensor."""
-#     # return tf.contrib.layers.layer_norm(
-#     #     inputs=input_tensor, begin_norm_axis=-1, begin_params_axis=-1, scope=name)
-#     return tf.keras.layers.LayerNormalization(axis=-1, epsilon=1e-12)(inputs=input_tensor)
-
-
-# def layer_norm_and_dropout(input_tensor, dropout_prob, name=None):
-#     """Runs layer normalization followed by dropout."""
-#     output_tensor = layer_norm(input_tensor, name)
-#     output_tensor = dropout(output_tensor, dropout_prob)
-#     return output_tensor
-
-
-# def create_initializer(initializer_range=0.02):
-#     """Creates a `truncated_normal_initializer` with the given range."""
-#     # return tf.compat.v1.truncated_normal_initializer(stddev=initializer_range)
-#     return tf.keras.initializers.TruncatedNormal(stddev=initializer_range)
 
 
 class Embedding(tf.keras.layers.Layer):

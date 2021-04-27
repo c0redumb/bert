@@ -521,15 +521,23 @@ def main(_):
     output_old = modeling_old.check_output
     print("Output in old model:", output_old)
 
-    model_new = modeling.BertModel(
-        config=bert_config,
-        is_training=is_training,
-        input_ids=input_ids,
-        input_mask=input_mask,
-        token_type_ids=segment_ids,
-        use_one_hot_embeddings=False)
+    # model_new = modeling.BertModel(
+    #     config=bert_config,
+    #     is_training=is_training,
+    #     input_ids=input_ids,
+    #     input_mask=input_mask,
+    #     token_type_ids=segment_ids)
+    model_new = modeling.BertLayer(
+        config=bert_config)
+
+        # is_training=is_training,
+        # input_ids=input_ids,
+        # input_mask=input_mask,
+        # token_type_ids=segment_ids)
 
     #print(model_new)
+    # Run it first to build the model
+    _ = model_new([input_ids, input_mask, segment_ids])
 
     # Copy embedding layer weights from old to new
     #print(model_new._embedding_layer._word_embedding_table)
@@ -565,9 +573,10 @@ def main(_):
     model_new._pooler_layer._pooler_dense.kernel = modeling_old.pooler_obj.kernel
     model_new._pooler_layer._pooler_dense.bias = modeling_old.pooler_obj.bias
 
-    attention_output = model_new._embedding_layer.call(input_ids, segment_ids)
-    encoder_output = model_new._encoder_layers[0].call(attention_output, input_mask)
-    pooler_output = model_new._pooler_layer.call(encoder_output)
+    # attention_output = model_new._embedding_layer.call(input_ids, segment_ids)
+    # encoder_output = model_new._encoder_layers[0].call(attention_output, input_mask)
+    # pooler_output = model_new._pooler_layer.call(encoder_output)
+    _ = model_new([input_ids, input_mask, segment_ids])
 
     output_new = modeling.check_output_new
     print("Output in new model:", output_new)
@@ -575,6 +584,10 @@ def main(_):
     std = tf.math.reduce_std(output_new - output_old)
     print("Standard Deviation:", std)
 
+    print(model_new.summary())
+
+    for w in model_new.trainable_weights:
+      print(w.name, w.shape)
     # tvar = tf.compat.v1.trainable_variables()
     # print(tvar)
 
