@@ -232,22 +232,30 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
         masked_lm_example_loss = tf.reshape(masked_lm_example_loss, [-1])
         masked_lm_ids = tf.reshape(masked_lm_ids, [-1])
         masked_lm_weights = tf.reshape(masked_lm_weights, [-1])
-        masked_lm_accuracy = tf.compat.v1.metrics.accuracy(
-            labels=masked_lm_ids,
-            predictions=masked_lm_predictions,
-            weights=masked_lm_weights)
-        masked_lm_mean_loss = tf.compat.v1.metrics.mean(
-            values=masked_lm_example_loss, weights=masked_lm_weights)
+        # masked_lm_accuracy = tf.compat.v1.metrics.accuracy(
+        #     labels=masked_lm_ids,
+        #     predictions=masked_lm_predictions,
+        #     weights=masked_lm_weights)
+        masked_lm_accuracy = tf.keras.metrics.Accuracy()
+        masked_lm_accuracy.update_state(masked_lm_ids, masked_lm_predictions, masked_lm_weights)
+        # masked_lm_mean_loss = tf.compat.v1.metrics.mean(
+        #     values=masked_lm_example_loss, weights=masked_lm_weights)
+        masked_lm_mean_loss = tf.keras.metrics.Mean()
+        masked_lm_mean_loss.update_state(masked_lm_example_loss, masked_lm_weights)
 
         next_sentence_log_probs = tf.reshape(
             next_sentence_log_probs, [-1, next_sentence_log_probs.shape[-1]])
         next_sentence_predictions = tf.argmax(
             input=next_sentence_log_probs, axis=-1, output_type=tf.int32)
         next_sentence_labels = tf.reshape(next_sentence_labels, [-1])
-        next_sentence_accuracy = tf.compat.v1.metrics.accuracy(
-            labels=next_sentence_labels, predictions=next_sentence_predictions)
-        next_sentence_mean_loss = tf.compat.v1.metrics.mean(
-            values=next_sentence_example_loss)
+        # next_sentence_accuracy = tf.compat.v1.metrics.accuracy(
+        #     labels=next_sentence_labels, predictions=next_sentence_predictions)
+        next_sentence_accuracy = tf.keras.metrics.Accuracy()
+        next_sentence_accuracy.update_state(next_sentence_labels, next_sentence_predictions)
+        # next_sentence_mean_loss = tf.compat.v1.metrics.mean(
+        #     values=next_sentence_example_loss)
+        next_sentence_mean_loss = tf.keras.metrics.Mean()
+        next_sentence_mean_loss.update_state(next_sentence_example_loss)
 
         return {
             "masked_lm_accuracy": masked_lm_accuracy,
@@ -336,6 +344,13 @@ def get_next_sentence_output(bert_config, input_tensor, labels):
 
     logits = tf.matmul(input_tensor, output_weights, transpose_b=True)
     logits = tf.nn.bias_add(logits, output_bias)
+
+    # seq_rel_dense = tf.keras.layers.Dense(
+    #   2,
+    #   kernel_initializer=modeling.create_initializer(bert_config.initializer_range),
+    # )
+    # logits = seq_rel_dense(input_tensor)
+
     log_probs = tf.nn.log_softmax(logits, axis=-1)
     labels = tf.reshape(labels, [-1])
     one_hot_labels = tf.one_hot(labels, depth=2, dtype=tf.float32)
