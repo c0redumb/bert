@@ -109,15 +109,7 @@ docker exec $CTNRNAME \
 python3 $CODE_DIR_INSIDE/run_matchtest.py \
   --input_file=$TRAIN_DIR_INSIDE/$DATA_TFRECORD \
   --output_dir=$TRAIN_DIR_INSIDE/$CUR_TRAINING \
-  --do_train=True \
-  --do_eval=True \
   --bert_config_file=$TRAIN_DIR_INSIDE/bert_config.json \
-  --train_batch_size=$BATCH \
-  --max_seq_length=$SEQ \
-  --max_predictions_per_seq=$MAX_PREDICTION_PER_SEQ \
-  --num_train_steps=$TRAIN_STEPS \
-  --num_warmup_steps=$WARMUP_STEPS \
-  --learning_rate=$LEARNING_RATE \
   2>&1 | tee $TRAIN_DIR/$OUTPUT_FILE_REL
 
 # Calculate performance metrics

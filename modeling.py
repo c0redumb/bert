@@ -30,7 +30,6 @@ import tensorflow as tf
 # tf.compat.v1.disable_eager_execution()
 
 from absl import logging
-check_output_new = None
 
 class BertConfig(object):
     """Configuration for `BertModel`."""
@@ -108,7 +107,7 @@ class BertConfig(object):
         return json.dumps(self.to_dict(), indent=2, sort_keys=True) + "\n"
 
 
-class BertLayer(tf.keras.Model):
+class BertModel(tf.keras.Model):
     """BERT model in a layer ("Bidirectional Encoder Representations from Transformers").
 
     This layer include the BERT model.
@@ -130,7 +129,7 @@ class BertLayer(tf.keras.Model):
           ValueError: The config is invalid or one of the input tensor shapes
             is invalid.
         """
-        super(BertLayer, self).__init__(**kwargs)
+        super(BertModel, self).__init__(**kwargs)
         self.config = config
         # self.seq_length = seq_length
         # self.batch_size = batch_size
@@ -246,162 +245,16 @@ class BertLayer(tf.keras.Model):
     def get_embedding_table(self):
         return self.embedding_table
 
-# TODO: Make BertModel a Keras model
-class BertModel(object):
-    """BERT model ("Bidirectional Encoder Representations from Transformers").
+    def get_config(self):
+        return {
+            "config_json": self.config.to_json_string()
+        }
 
-    Example usage:
-
-    ```python
-    # Already been converted into WordPiece token ids
-    input_ids = tf.constant([[31, 51, 99], [15, 5, 0]])
-    input_mask = tf.constant([[1, 1, 1], [1, 1, 0]])
-    token_type_ids = tf.constant([[0, 0, 1], [0, 2, 0]])
-
-    config = modeling.BertConfig(vocab_size=32000, hidden_size=512,
-      num_hidden_layers=8, num_attention_heads=6, intermediate_size=1024)
-
-    model = modeling.BertModel(config=config, is_training=True,
-      input_ids=input_ids, input_mask=input_mask, token_type_ids=token_type_ids)
-
-    label_embeddings = tf.get_variable(...)
-    pooled_output = model.get_pooled_output()
-    logits = tf.matmul(pooled_output, label_embeddings)
-    ...
-    ```
-    """
-
-    def __init__(self,
-                 config,
-                 is_training,
-                 input_ids,
-                 input_mask=None,
-                 token_type_ids=None,
-                 #use_one_hot_embeddings=False,
-                 scope=None):
-        """Constructor for BertModel.
-
-        Args:
-          config: `BertConfig` instance.
-          is_training: bool. true for training model, false for eval model. Controls
-            whether dropout will be applied.
-          input_ids: int32 Tensor of shape [batch_size, seq_length].
-          input_mask: (optional) int32 Tensor of shape [batch_size, seq_length].
-          token_type_ids: (optional) int32 Tensor of shape [batch_size, seq_length].
-          use_one_hot_embeddings: (optional) bool. Ignored, left here for compatibility.
-          scope: (optional) variable scope. Defaults to "bert".
-
-        Raises:
-          ValueError: The config is invalid or one of the input tensor shapes
-            is invalid.
-        """
-        config = copy.deepcopy(config)
-        if not is_training:
-            config.hidden_dropout_prob = 0.0
-            config.attention_probs_dropout_prob = 0.0
-
-        input_shape = get_shape_list(input_ids, expected_rank=2)
-        batch_size = input_shape[0]
-        seq_length = input_shape[1]
-        logging.info('Shape of input_ids: %s', input_shape)
-        logging.info('        batch_size: %s', batch_size)
-        logging.info('        seq_length: %s', seq_length)
-
-        if input_mask is None:
-            input_mask = tf.ones(
-                shape=[batch_size, seq_length], dtype=tf.int32)
-
-        if token_type_ids is None:
-            token_type_ids = tf.zeros(
-                shape=[batch_size, seq_length], dtype=tf.int32)
-
-        with tf.compat.v1.variable_scope(scope, default_name="bert"):
-            self._embedding_layer = Embedding(
-                embedding_size=config.hidden_size,
-                vocab_size=config.vocab_size,
-                token_type_vocab_size=config.type_vocab_size,
-                max_position_embeddings=config.max_position_embeddings,
-                init_range=config.initializer_range,
-                dropout_prob=config.hidden_dropout_prob,
-                name="embedding_layer"
-            )
-            self.embedding_output = self._embedding_layer(
-                input_ids, token_type_ids, training=is_training)
-            self.embedding_table = self._embedding_layer.get_embedding_table()
-
-            # This converts a 2D mask of shape [batch_size, seq_length] to a 3D
-            # mask of shape [batch_size, seq_length, seq_length] which is used
-            # for the attention scores.
-            attention_mask = create_attention_mask_from_input_mask(
-                input_ids, input_mask)
-
-            # Run the stacked transformer encoder
-            self._encoder_layers = []  # This holds the encoder layer objects
-            self.all_encoder_layers = []  # This holds the encoder layer outputs
-
-            layer_input = self.embedding_output
-            for idx in range(config.num_hidden_layers):
-                encoder_layer = TransformerEncoder(
-                    num_attention_heads=config.num_attention_heads,
-                    hidden_size=config.hidden_size,
-                    intermediate_size=config.intermediate_size,
-                    intermediate_act_fn=config.hidden_act,
-                    attn_probs_dropout_prob=config.attention_probs_dropout_prob,
-                    other_dropout_prob=config.hidden_dropout_prob,
-                    init_range=config.initializer_range,
-                    name="encoder_layer_%d" % idx
-                )
-                layer_output = encoder_layer(layer_input,
-                                             attention_mask=attention_mask, training=is_training)
-
-                self._encoder_layers.append(encoder_layer)
-                self.all_encoder_layers.append(layer_output)
-                layer_input = layer_output
-
-            self.sequence_output = self.all_encoder_layers[-1]
-
-            # The "pooler" converts the encoded sequence tensor of shape
-            # [batch_size, seq_length, hidden_size] to a tensor of shape
-            # [batch_size, hidden_size]. This is necessary for segment-level
-            # (or segment-pair-level) classification tasks where we need a fixed
-            # dimensional representation of the segment.
-            self._pooler_layer = Pooler(
-                hidden_size=config.hidden_size,
-                act_fn="tanh",
-                init_range=config.initializer_range,
-                name="pooler_layer"
-            )
-            self.pooled_output = self._pooler_layer(self.sequence_output)
-
-    def get_pooled_output(self):
-        return self.pooled_output
-
-    def get_sequence_output(self):
-        """Gets final hidden layer of encoder.
-
-        Returns:
-          float Tensor of shape [batch_size, seq_length, hidden_size] corresponding
-          to the final hidden of the transformer encoder.
-        """
-        return self.sequence_output
-
-    def get_all_encoder_layers(self):
-        return self.all_encoder_layers
-
-    def get_embedding_output(self):
-        """Gets output of the embedding lookup (i.e., input to the transformer).
-
-        Returns:
-          float Tensor of shape [batch_size, seq_length, hidden_size] corresponding
-          to the output of the embedding layer, after summing the word
-          embeddings with the positional embeddings and the token type embeddings,
-          then performing layer normalization. This is the input to the transformer.
-        """
-        return self.embedding_output
-
-    def get_embedding_table(self):
-        return self.embedding_table
-
+    @classmethod
+    def from_config(cls, config):
+        bert_config = BertConfig.from_dict(json.loads(config["config_json"]))
+        print("Config loaded", bert_config)
+        return cls(config=bert_config)
 
 class Embedding(tf.keras.layers.Layer):
     """Embedding layer in BERT
@@ -601,9 +454,6 @@ class Pooler(tf.keras.layers.Layer):
         # to the first token. We assume that this has been pre-trained
         first_token_tensor = tf.squeeze(input_tensor[:, 0:1, :], axis=1)
         output = self._pooler_dense(first_token_tensor)
-
-        global check_output_new
-        check_output_new = output
 
         return output
 

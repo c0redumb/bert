@@ -173,7 +173,7 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
     #     token_type_ids=segment_ids,
     #     #use_one_hot_embeddings=use_one_hot_embeddings
     #     )
-    model = modeling.BertLayer(config=bert_config)
+    model = modeling.BertModel(config=bert_config)
     model_output = model([input_ids, input_mask, segment_ids])
 
     (masked_lm_loss,

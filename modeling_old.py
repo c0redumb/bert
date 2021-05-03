@@ -28,9 +28,6 @@ import six
 import tensorflow as tf
 #tf.compat.v1.disable_eager_execution()
 
-# Checked Output
-check_output = None
-
 # Embedding Layer Weights
 embedding_table = None
 token_type_table = None
@@ -255,8 +252,6 @@ class BertModel(object):
             activation=tf.tanh,
             kernel_initializer=create_initializer(config.initializer_range))
         self.pooled_output = pooler_obj.apply(first_token_tensor)
-        global check_output
-        check_output = self.pooled_output
 
   def get_pooled_output(self):
     return self.pooled_output
@@ -881,7 +876,6 @@ def transformer_model(input_tensor,
   prev_output = reshape_to_matrix(input_tensor)
 
   global attention_output_objs, intermediate_output_objs, output_objs
-  global check_output
 
   all_layer_outputs = []
   for layer_idx in range(num_hidden_layers):
