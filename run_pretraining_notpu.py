@@ -143,9 +143,8 @@ class LogSessionRunHook(tf.estimator.SessionRunHook):
         self.count = 0
 
 
-def model_fn_builder(bert_config, init_checkpoint, learning_rate,
-                     num_train_steps, num_warmup_steps, use_tpu,
-                     use_one_hot_embeddings, use_hvd, use_amp):
+def model_fn_builder(bert_config, learning_rate,
+                     num_train_steps, num_warmup_steps):
   """Returns `model_fn` closure for Estimator."""
 
   def model_fn(features, labels, mode, params):  # pylint: disable=unused-argument
@@ -195,11 +194,17 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
     tvars = tf.compat.v1.trainable_variables()
 
     initialized_variable_names = {}
-    if init_checkpoint and (hvd == None or hvd.rank() == 0):
-      logging.info("**** Init Checkpoint {} {} ****".format(hvd.rank(), init_checkpoint))
-      (assignment_map, initialized_variable_names) = \
-        modeling.get_assignment_map_from_checkpoint(tvars, init_checkpoint)
-      tf.compat.v1.train.init_from_checkpoint(init_checkpoint, assignment_map)
+    # #if init_checkpoint and (hvd == None or hvd.rank() == 0):
+    # if init_checkpoint:
+    #   #logging.info("**** Init Checkpoint {} {} ****".format(hvd.rank(), init_checkpoint))
+    #   logging.info("**** Init Checkpoint {} ****".format(init_checkpoint))
+    #   (assignment_map, initialized_variable_names) = \
+    #     modeling.get_assignment_map_from_checkpoint(tvars, init_checkpoint)
+    #   tf.compat.v1.train.init_from_checkpoint(init_checkpoint, assignment_map)
+    #   # checkpoint = tf.train.Checkpoint(root=model)
+    #   # checkpoint.restore(tf.train.latest_checkpoint(init_checkpoint))
+    #   #model.load_weights(tf.train.latest_checkpoint(init_checkpoint))
+    #   #print(tf.train.list_variables(init_checkpoint))
 
     logging.info("**** Trainable Variables ****")
     for var in tvars:
@@ -214,7 +219,7 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
       # train_op = optimization.create_optimizer(
       #     total_loss, learning_rate, num_train_steps, num_warmup_steps, use_tpu, use_hvd, FLAGS.optimizer_type, use_amp)
       train_op = optimization.create_optimizer(
-          total_loss, learning_rate, num_train_steps, num_warmup_steps, use_tpu, use_hvd, 'adam', use_amp)
+          total_loss, learning_rate, num_train_steps, num_warmup_steps, None, None, 'adam', None)
 
       output_spec = tf.estimator.EstimatorSpec(
           mode=mode,
@@ -289,24 +294,37 @@ def get_masked_lm_output(bert_config, input_tensor, output_weights, positions,
   """Get loss and log probs for the masked LM."""
   input_tensor = gather_indexes(input_tensor, positions)
 
-  with tf.compat.v1.variable_scope("cls/predictions"):
+  #with tf.compat.v1.variable_scope("cls/predictions"):
+  with tf.name_scope("cls/masked_lm_pred") as scope:
     # We apply one more non-linear transformation before the output layer.
     # This matrix is not used after pre-training.
-    with tf.compat.v1.variable_scope("transform"):
-      input_tensor = tf.compat.v1.layers.dense(
-          input_tensor,
-          units=bert_config.hidden_size,
-          activation=modeling.get_activation(bert_config.hidden_act),
-          kernel_initializer=modeling.create_initializer(
-              bert_config.initializer_range))
-      input_tensor = modeling.layer_norm(input_tensor)
+    # with tf.compat.v1.variable_scope("transform"):
+    #   input_tensor = tf.compat.v1.layers.dense(
+    #       input_tensor,
+    #       units=bert_config.hidden_size,
+    #       activation=modeling.get_activation(bert_config.hidden_act),
+    #       kernel_initializer=modeling.create_initializer(
+    #           bert_config.initializer_range))
+    #   input_tensor = modeling.layer_norm(input_tensor)
+    im_pred_dense = tf.keras.layers.Dense(
+      units=bert_config.hidden_size,
+      activation=modeling.get_activation(bert_config.hidden_act),
+      kernel_initializer=modeling.create_initializer(bert_config.initializer_range),
+    )
+    input_tensor = im_pred_dense(input_tensor)
+    input_tensor = modeling.layer_norm(input_tensor)
 
     # The output weights are the same as the input embeddings, but there is
     # an output-only bias for each token.
-    output_bias = tf.compat.v1.get_variable(
-        "output_bias",
-        shape=[bert_config.vocab_size],
-        initializer=tf.compat.v1.zeros_initializer())
+    # output_bias = tf.compat.v1.get_variable(
+    #     "output_bias",
+    #     shape=[bert_config.vocab_size],
+    #     initializer=tf.compat.v1.zeros_initializer())
+    output_bias = tf.Variable(
+      name="output_bias",
+      shape=[bert_config.vocab_size],
+      initial_value=tf.zeros([bert_config.vocab_size])
+    )
     logits = tf.matmul(input_tensor, output_weights, transpose_b=True)
     logits = tf.nn.bias_add(logits, output_bias)
     log_probs = tf.nn.log_softmax(logits, axis=-1)
@@ -334,22 +352,23 @@ def get_next_sentence_output(bert_config, input_tensor, labels):
 
   # Simple binary classification. Note that 0 is "next sentence" and 1 is
   # "random sentence". This weight matrix is not used after pre-training.
-  with tf.compat.v1.variable_scope("cls/seq_relationship"):
-    output_weights = tf.compat.v1.get_variable(
-        "output_weights",
-        shape=[2, bert_config.hidden_size],
-        initializer=modeling.create_initializer(bert_config.initializer_range))
-    output_bias = tf.compat.v1.get_variable(
-        "output_bias", shape=[2], initializer=tf.compat.v1.zeros_initializer())
+  #with tf.compat.v1.variable_scope("cls/seq_relationship"):
+  with tf.name_scope("cls/next_sentense_pred") as scope:
+    # output_weights = tf.compat.v1.get_variable(
+    #     "output_weights",
+    #     shape=[2, bert_config.hidden_size],
+    #     initializer=modeling.create_initializer(bert_config.initializer_range))
+    # output_bias = tf.compat.v1.get_variable(
+    #     "output_bias", shape=[2], initializer=tf.compat.v1.zeros_initializer())
 
-    logits = tf.matmul(input_tensor, output_weights, transpose_b=True)
-    logits = tf.nn.bias_add(logits, output_bias)
+    # logits = tf.matmul(input_tensor, output_weights, transpose_b=True)
+    # logits = tf.nn.bias_add(logits, output_bias)
 
-    # seq_rel_dense = tf.keras.layers.Dense(
-    #   2,
-    #   kernel_initializer=modeling.create_initializer(bert_config.initializer_range),
-    # )
-    # logits = seq_rel_dense(input_tensor)
+    seq_rel_dense = tf.keras.layers.Dense(
+      units=2,
+      kernel_initializer=modeling.create_initializer(bert_config.initializer_range),
+    )
+    logits = seq_rel_dense(input_tensor)
 
     log_probs = tf.nn.log_softmax(logits, axis=-1)
     labels = tf.reshape(labels, [-1])
@@ -484,22 +503,29 @@ def main(_):
 
   model_fn = model_fn_builder(
       bert_config=bert_config,
-      init_checkpoint=FLAGS.init_checkpoint,
+      #init_checkpoint=FLAGS.init_checkpoint,
+      #init_checkpoint=None,
       learning_rate=FLAGS.learning_rate,
       num_train_steps=FLAGS.num_train_steps,
-      num_warmup_steps=FLAGS.num_warmup_steps,
-      use_tpu=False,
-      use_one_hot_embeddings=False,
-      use_hvd=False,
-      use_amp=False)
+      num_warmup_steps=FLAGS.num_warmup_steps)
+      # use_tpu=False,
+      # use_one_hot_embeddings=False,
+      # use_hvd=False,
+      # use_amp=False)
 
   params = {
     'batch_size': FLAGS.train_batch_size
   }
-  estimator = tf.compat.v1.estimator.Estimator(
+
+  # estimator = tf.compat.v1.estimator.Estimator(
+  #     model_fn=model_fn,
+  #     config=run_config,
+  #     params=params)
+  estimator = tf.estimator.Estimator(
       model_fn=model_fn,
       config=run_config,
-      params=params)
+      params=params,
+      warm_start_from=FLAGS.init_checkpoint)
 
   if FLAGS.do_train:
     logging.info("***** Running training *****")
