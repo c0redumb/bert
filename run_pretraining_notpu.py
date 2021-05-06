@@ -143,13 +143,13 @@ class LogSessionRunHook(tf.estimator.SessionRunHook):
         self.count = 0
 
 
-def model_fn_builder(bert_config, learning_rate,
-                     num_train_steps, num_warmup_steps):
+def model_fn_builder():
   """Returns `model_fn` closure for Estimator."""
 
   def model_fn(features, labels, mode, params):  # pylint: disable=unused-argument
     """The `model_fn` for Estimator."""
 
+    ### Input Features ###
     logging.info("*** Features ***")
     for name in sorted(features.keys()):
       logging.info("  name = %s, shape = %s" % (name, features[name].shape))
@@ -161,6 +161,21 @@ def model_fn_builder(bert_config, learning_rate,
     masked_lm_ids = features["masked_lm_ids"]
     masked_lm_weights = features["masked_lm_weights"]
     next_sentence_labels = features["next_sentence_labels"]
+
+    # logging.info("Segment ID shape: %s %s" % (segment_ids.shape.as_list(), segment_ids.dtype))
+    # logging.info("Next Sentence Labels shape: %s %s" % (next_sentence_labels.shape.as_list(), next_sentence_labels.dtype))
+
+    ### Model ###
+    bert_config = modeling.BertConfig.from_json_file(FLAGS.bert_config_file)
+
+    # t_model = get_pretraining_model(bert_config, params)
+    # t_output = t_model([input_ids, input_mask, segment_ids, next_sentence_labels])
+    # tvars = t_model.trainable_variables
+    # logging.info("**** Trainable Variables #32 ****")
+    # for var in tvars:
+    #   init_string = ""
+    #   logging.info("**  name = %s, shape = %s%s", var.name, var.shape,
+    #                   init_string)
 
     model = modeling.BertModel(config=bert_config)
     model_output = model([input_ids, input_mask, segment_ids])
@@ -191,8 +206,11 @@ def model_fn_builder(bert_config, learning_rate,
     if mode == tf.estimator.ModeKeys.TRAIN:
       # train_op = optimization.create_optimizer(
       #     total_loss, learning_rate, num_train_steps, num_warmup_steps, use_tpu, use_hvd, FLAGS.optimizer_type, use_amp)
-      train_op = optimization.create_optimizer(
-          total_loss, learning_rate, num_train_steps, num_warmup_steps, None, None, 'adam', None)
+      train_op = optimization.create_optimizer(total_loss,
+                                              params["learning_rate"],
+                                              params["num_train_steps"],
+                                              params["num_warmup_steps"],
+                                              None, None, "adam", None)
 
       output_spec = tf.estimator.EstimatorSpec(
           mode=mode,
@@ -250,6 +268,44 @@ def model_fn_builder(bert_config, learning_rate,
     return output_spec
 
   return model_fn
+
+def get_pretraining_model(bert_config, params):
+  """Build model for BERT pretraining"""
+  #batch_size = params["batch_size"]
+  seq_length = params["max_seq_length"]
+
+  input_ids = tf.keras.Input(shape=(seq_length,), name="input_ids_i", dtype=tf.int32)
+  input_mask = tf.keras.Input(shape=(seq_length,), name="input_mask_i", dtype=tf.int32)
+  segment_ids = tf.keras.Input(shape=(seq_length,), name="segment_ids_i", dtype=tf.int32)
+
+  next_sentence_labels = tf.keras.Input(shape=(1,), name="next_sentence_labels_i", dtype=tf.int32)
+
+  logging.info("## Segment ID shape: %s %s" % (segment_ids.shape.as_list(), segment_ids.dtype))
+  logging.info("## Next Sentence Labels shape: %s %s" % (next_sentence_labels.shape.as_list(), next_sentence_labels.dtype))
+
+  model = modeling.BertModel(config=bert_config)
+  model_output = model([input_ids, input_mask, segment_ids])
+
+  # (masked_lm_loss,
+  #   masked_lm_example_loss, masked_lm_log_probs) = get_masked_lm_output(
+  #       bert_config, model.get_sequence_output(), model.get_embedding_table(),
+  #       masked_lm_positions, masked_lm_ids, masked_lm_weights)
+
+  (next_sentence_loss, next_sentence_example_loss,
+    next_sentence_log_probs) = get_next_sentence_output(
+        bert_config, model.get_pooled_output(), next_sentence_labels)
+
+  total_loss = next_sentence_loss
+
+  # #masked_lm_loss = tf.identity(masked_lm_loss, name='mlm_loss')
+  # next_sentence_loss = tf.identity(next_sentence_loss, name='nsp_loss')
+  # total_loss = tf.identity(total_loss, name='total_loss')
+
+  training_model = tf.keras.Model(
+    inputs = [input_ids, input_mask, segment_ids, next_sentence_labels], 
+    outputs = [total_loss])
+
+  return training_model
 
 
 def get_masked_lm_output(bert_config, input_tensor, output_weights, positions,
@@ -330,15 +386,18 @@ def gather_indexes(sequence_tensor, positions):
 
 
 def input_fn_builder(input_files,
-                     max_seq_length,
-                     max_predictions_per_seq,
+                     #max_seq_length,
+                     #max_predictions_per_seq,
+                     batch_size,
                      is_training,
                      num_cpu_threads=4):
-  """Creates an `input_fn` closure to be passed to TPUEstimator."""
+  """Creates an `input_fn` closure to be passed to Estimator."""
 
   def input_fn(params):
     """The actual input function."""
-    batch_size = params["batch_size"]
+    #batch_size = params["batch_size"]
+    max_seq_length = params["max_seq_length"]
+    max_predictions_per_seq = params["max_predictions_per_seq"]
 
     name_to_features = {
         "input_ids":
@@ -417,8 +476,6 @@ def main(_):
   if not FLAGS.do_train and not FLAGS.do_eval:
     raise ValueError("At least one of `do_train` or `do_eval` must be True.")
 
-  bert_config = modeling.BertConfig.from_json_file(FLAGS.bert_config_file)
-
   tf.io.gfile.makedirs(FLAGS.output_dir)
 
   input_files = []
@@ -436,14 +493,16 @@ def main(_):
     log_step_count_steps=FLAGS.num_report_steps
   )
 
-  model_fn = model_fn_builder(
-      bert_config=bert_config,
-      learning_rate=FLAGS.learning_rate,
-      num_train_steps=FLAGS.num_train_steps,
-      num_warmup_steps=FLAGS.num_warmup_steps)
+  model_fn = model_fn_builder()
 
   params = {
-    'batch_size': FLAGS.train_batch_size
+    "bert_config_file": FLAGS.bert_config_file,
+    "max_seq_length": FLAGS.max_seq_length,
+    "max_predictions_per_seq": FLAGS.max_predictions_per_seq,
+    #"batch_size": FLAGS.train_batch_size,
+    "learning_rate": FLAGS.learning_rate,
+    "num_train_steps": FLAGS.num_train_steps,
+    "num_warmup_steps": FLAGS.num_warmup_steps
   }
 
   estimator = tf.estimator.Estimator(
@@ -454,11 +513,12 @@ def main(_):
 
   if FLAGS.do_train:
     logging.info("***** Running training *****")
-    logging.info("  Batch size = %d", FLAGS.train_batch_size)
+    logging.info("  Training Batch size = %d", FLAGS.train_batch_size)
     train_input_fn = input_fn_builder(
         input_files=input_files,
-        max_seq_length=FLAGS.max_seq_length,
-        max_predictions_per_seq=FLAGS.max_predictions_per_seq,
+        #max_seq_length=FLAGS.max_seq_length,
+        #max_predictions_per_seq=FLAGS.max_predictions_per_seq,
+        batch_size=FLAGS.train_batch_size,
         is_training=True)
 
     hooks = []
@@ -468,12 +528,13 @@ def main(_):
 
   if FLAGS.do_eval:
     logging.info("***** Running evaluation *****")
-    logging.info("  Batch size = %d", FLAGS.eval_batch_size)
+    logging.info("  Evaluation Batch size = %d", FLAGS.eval_batch_size)
 
     eval_input_fn = input_fn_builder(
         input_files=input_files,
-        max_seq_length=FLAGS.max_seq_length,
-        max_predictions_per_seq=FLAGS.max_predictions_per_seq,
+        #max_seq_length=FLAGS.max_seq_length,
+        #max_predictions_per_seq=FLAGS.max_predictions_per_seq,
+        batch_size=FLAGS.eval_batch_size,
         is_training=False)
 
     result = estimator.evaluate(
