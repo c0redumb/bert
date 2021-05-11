@@ -21,7 +21,6 @@ from __future__ import print_function
 
 import os
 import modeling
-#import modeling_old as modeling
 import optimization
 import tensorflow as tf
 #tf.compat.v1.disable_eager_execution()
@@ -162,18 +161,22 @@ def model_fn_builder():
     masked_lm_weights = features["masked_lm_weights"]
     next_sentence_labels = features["next_sentence_labels"]
 
-    # logging.info("Segment ID shape: %s %s" % (segment_ids.shape.as_list(), segment_ids.dtype))
-    # logging.info("Next Sentence Labels shape: %s %s" % (next_sentence_labels.shape.as_list(), next_sentence_labels.dtype))
-
     ### Model ###
     bert_config = modeling.BertConfig.from_json_file(FLAGS.bert_config_file)
 
-    # (t_model, _, _) = get_pretraining_model(bert_config, params)
-    # t_output = t_model([input_ids, input_mask, segment_ids, 
-    #   masked_lm_positions, masked_lm_ids, masked_lm_weights,
-    #   next_sentence_labels])
+    # (t_model, t_loss, t_metrics) = get_pretraining_model(bert_config, params)
 
-    # # print(t_model.summary())
+    # logging.info("Shapes: %s %s %s" % (input_ids.shape.as_list(), input_mask.shape.as_list(), segment_ids.shape.as_list()))
+    # logging.info("Shapes: %s %s %s" % (masked_lm_positions.shape.as_list(), masked_lm_ids.shape.as_list(), masked_lm_weights.shape.as_list()))
+    # logging.info("Shapes: %s" % (next_sentence_labels.shape.as_list()))
+    # (input_ids.shape.as_list(), input_mask.shape.as_list(), segment_ids.shape.as_list(),
+    # masked_lm_positions.shape.as_list(), masked_lm_ids.shape.as_list(), masked_lm_weights.shape.as_list(),
+    # next_sentence_labels.shape.as_list()))
+    # t_output = t_model(inputs=[input_ids, input_mask, segment_ids, 
+    #     masked_lm_positions, masked_lm_ids, masked_lm_weights,
+    #     next_sentence_labels])
+
+    # # # print(t_model.summary())
     # tvars = t_model.trainable_variables
     # logging.info("**** Trainable Variables #32 ****")
     # for var in tvars:
@@ -186,11 +189,6 @@ def model_fn_builder():
 
     bert_sequence_output = model.get_sequence_output()
     bert_embedding_weight = model.get_embedding_table()
-
-    # (masked_lm_loss,
-    #  masked_lm_example_loss, masked_lm_log_probs) = get_masked_lm_output(
-    #      bert_config, model.get_sequence_output(), model.get_embedding_table(),
-    #      masked_lm_positions, masked_lm_ids, masked_lm_weights)
 
     # Masked LM prediction
     pred_masked_lm = PredictMaskedLM(
@@ -209,8 +207,6 @@ def model_fn_builder():
                                     example_loss=masked_lm_loss["per_example_loss"],
                                     masked_lm_ids=masked_lm_ids,
                                     masked_lm_weights=masked_lm_weights)
-    # masked_lm_example_loss = masked_lm_loss["per_example_loss"]
-    # masked_lm_loss = masked_lm_loss["loss"]
 
     # Next Sentence prediction
     pred_next_sentence = PredictNextSentence(bert_config=bert_config)
@@ -223,15 +219,11 @@ def model_fn_builder():
                                     example_loss=next_sentence_loss["per_example_loss"],
                                     next_sentence_labels=next_sentence_labels)
 
-    # (next_sentence_loss, next_sentence_example_loss,
-    #  next_sentence_log_probs) = get_next_sentence_output(
-    #      bert_config, model.get_pooled_output(), next_sentence_labels)
-
-    total_loss = masked_lm_loss["loss"] + next_sentence_loss["loss"]
+    t_loss = masked_lm_loss["loss"] + next_sentence_loss["loss"]
 
     masked_lm_loss = tf.identity(masked_lm_loss["loss"], name='mlm_loss')
     next_sentence_loss = tf.identity(next_sentence_loss["loss"], name='nsp_loss')
-    total_loss = tf.identity(total_loss, name='total_loss')
+    t_loss = tf.identity(t_loss, name='total_loss')
 
     tvars = tf.compat.v1.trainable_variables()
     logging.info("**** Trainable Variables ****")
@@ -244,7 +236,7 @@ def model_fn_builder():
     if mode == tf.estimator.ModeKeys.TRAIN:
       # train_op = optimization.create_optimizer(
       #     total_loss, learning_rate, num_train_steps, num_warmup_steps, use_tpu, use_hvd, FLAGS.optimizer_type, use_amp)
-      train_op = optimization.create_optimizer(total_loss,
+      train_op = optimization.create_optimizer(t_loss,
                                               params["learning_rate"],
                                               params["num_train_steps"],
                                               params["num_warmup_steps"],
@@ -252,67 +244,16 @@ def model_fn_builder():
 
       output_spec = tf.estimator.EstimatorSpec(
           mode=mode,
-          loss=total_loss,
+          # loss=total_loss,
+          loss=t_loss,
           train_op=train_op)
     elif mode == tf.estimator.ModeKeys.EVAL:
-      # def metric_fn(masked_lm_example_loss, masked_lm_log_probs, masked_lm_ids,
-      #               masked_lm_weights):
-      #   # , next_sentence_example_loss,
-      #   # next_sentence_log_probs, next_sentence_labels):
-      #   """Computes the loss and accuracy of the model."""
-      #   masked_lm_log_probs = tf.reshape(masked_lm_log_probs,
-      #                                    [-1, masked_lm_log_probs.shape[-1]])
-      #   masked_lm_predictions = tf.argmax(
-      #       input=masked_lm_log_probs, axis=-1, output_type=tf.int32)
-      #   masked_lm_example_loss = tf.reshape(masked_lm_example_loss, [-1])
-      #   masked_lm_ids = tf.reshape(masked_lm_ids, [-1])
-      #   masked_lm_weights = tf.reshape(masked_lm_weights, [-1])
-      #   masked_lm_accuracy = tf.keras.metrics.Accuracy()
-      #   masked_lm_accuracy.update_state(masked_lm_ids, masked_lm_predictions, masked_lm_weights)
-      #   masked_lm_mean_loss = tf.keras.metrics.Mean()
-      #   masked_lm_mean_loss.update_state(masked_lm_example_loss, masked_lm_weights)
-
-      #   # next_sentence_log_probs = tf.reshape(
-      #   #     next_sentence_log_probs, [-1, next_sentence_log_probs.shape[-1]])
-      #   # next_sentence_predictions = tf.argmax(
-      #   #     input=next_sentence_log_probs, axis=-1, output_type=tf.int32)
-      #   # next_sentence_labels = tf.reshape(next_sentence_labels, [-1])
-      #   # next_sentence_accuracy = tf.keras.metrics.Accuracy()
-      #   # next_sentence_accuracy.update_state(next_sentence_labels, next_sentence_predictions)
-      #   # next_sentence_mean_loss = tf.keras.metrics.Mean()
-      #   # next_sentence_mean_loss.update_state(next_sentence_example_loss)
-
-      #   return {
-      #       "masked_lm_accuracy": masked_lm_accuracy,
-      #       "masked_lm_loss": masked_lm_mean_loss,
-      #       # "next_sentence_accuracy": next_sentence_accuracy,
-      #       # "next_sentence_loss": next_sentence_mean_loss,
-      #   }
-
-      # metrics = metric_fn(
-      #       masked_lm_example_loss=masked_lm_example_loss,
-      #       masked_lm_log_probs=masked_lm_log_probs,
-      #       masked_lm_ids=masked_lm_ids,
-      #       masked_lm_weights=masked_lm_weights)
-      # print(metrics)
-      # print(next_sentence_metrics)
-      #metrics.update(next_sentence_metrics)
-      #metrics = {**metrics, **next_sentence_metrics}
-      #print(metrics)
-
       output_spec = tf.estimator.EstimatorSpec(
           mode=mode,
-          loss=total_loss,
-          # eval_metric_ops=metric_fn(
-          #   masked_lm_example_loss=masked_lm_example_loss,
-          #   masked_lm_log_probs=masked_lm_log_probs,
-          #   masked_lm_ids=masked_lm_ids,
-          #   masked_lm_weights=masked_lm_weights,
-          #   next_sentence_example_loss=next_sentence_example_loss,
-          #   next_sentence_log_probs=next_sentence_log_probs,
-          #   next_sentence_labels=next_sentence_labels
-          # )
-          eval_metric_ops={**masked_lm_metrics, **next_sentence_metrics}
+          # loss=total_loss,
+          eval_metric_ops={**masked_lm_metrics, **next_sentence_metrics},
+          loss=t_loss,
+          #eval_metric_ops=t_metrics
           )
     else:
       raise ValueError("Only TRAIN and EVAL modes are supported: %s" % (mode))
@@ -321,49 +262,24 @@ def model_fn_builder():
 
   return model_fn
 
-class Bias(tf.keras.layers.Layer):
-    """Bias layer in BERT pretraining"""
-
-    def __init__(self,
-                 units,
-                 **kwargs):
-        """Initialize Bias for BERT pretraining
-
-        Args:
-        """
-        self._units = units
-        super(Bias, self).__init__(**kwargs)
-
-    def build(self, input_shape):
-        self._bias = self.add_weight(
-                'bias',
-                shape=[self._units,],
-                initializer=tf.keras.initializers.Zeros,
-                trainable=True)
-        super(Bias, self).build(input_shape)
-
-    def get_config(self):
-        return {
-            "units": self._units,
-        }
-
-    def call(self, input_tensor, training=None):
-        return input_tensor + self._bias
 
 def get_pretraining_model(bert_config, params):
   """Build model for BERT pretraining"""
   max_seq_length = params["max_seq_length"]
   max_predictions_per_seq = params["max_predictions_per_seq"]
 
+  logging.info("Max seq length: %d" % (max_seq_length))
+  logging.info("Max pred per seq: %d" % (max_predictions_per_seq))
+
   # These are the input tensors to the model
   # TODO: Change int32 to int64, because we don't care about TPU
-  input_ids = tf.keras.Input(shape=(max_seq_length,), dtype=tf.int32)
-  input_mask = tf.keras.Input(shape=(max_seq_length,), dtype=tf.int32)
-  segment_ids = tf.keras.Input(shape=(max_seq_length,), dtype=tf.int32)
-  masked_lm_positions = tf.keras.Input(shape=(max_predictions_per_seq,), dtype=tf.int32)
-  masked_lm_ids = tf.keras.Input(shape=(max_predictions_per_seq,), dtype=tf.int32)
-  masked_lm_weights = tf.keras.Input(shape=(max_predictions_per_seq,), dtype=tf.float32)
-  next_sentence_labels = tf.keras.Input(shape=(1,), dtype=tf.int32)
+  input_ids = tf.keras.Input(shape=(max_seq_length,), dtype=tf.int32, name="input_ids")
+  input_mask = tf.keras.Input(shape=(max_seq_length,), dtype=tf.int32, name="input_mask")
+  segment_ids = tf.keras.Input(shape=(max_seq_length,), dtype=tf.int32, name="segment_ids")
+  masked_lm_positions = tf.keras.Input(shape=(max_predictions_per_seq,), dtype=tf.int32, name="mlm_positions")
+  masked_lm_ids = tf.keras.Input(shape=(max_predictions_per_seq,), dtype=tf.int32, name="mlm_ids")
+  masked_lm_weights = tf.keras.Input(shape=(max_predictions_per_seq,), dtype=tf.float32, name="mlm_weights")
+  next_sentence_labels = tf.keras.Input(shape=(1,), dtype=tf.int32, name="ns_labels")
 
   # BERT model
   bert = modeling.BertModel(config=bert_config)
@@ -400,62 +316,6 @@ def get_pretraining_model(bert_config, params):
                                   example_loss=next_sentence_loss["per_example_loss"],
                                   next_sentence_labels=next_sentence_labels)
 
-
-  # Training Classification: Masked LM Prediction
-  # with tf.name_scope("cls/masked_lm_pred") as scope:
-  #   # Extract the prediction at the masked positions
-  #   lm_pred_tensor = gather_indexes(bert_sequence_output, masked_lm_positions)
-
-  #   # An additional nonlinear dense
-  #   im_pred_dense = tf.keras.layers.Dense(
-  #     units=bert_config.hidden_size,
-  #     activation=modeling.get_activation(bert_config.hidden_act),
-  #     kernel_initializer=modeling.create_initializer(bert_config.initializer_range),
-  #   )
-  #   lm_pred_tensor = im_pred_dense(lm_pred_tensor)
-  #   lm_pred_tensor = modeling.layer_norm(lm_pred_tensor)
-
-  #   # Reverse into words using the same embedding table
-  #   # lm_pred_output_bias = tf.Variable(
-  #   #   name="output_bias",
-  #   #   shape=[bert_config.vocab_size],
-  #   #   initial_value=tf.zeros([bert_config.vocab_size])
-  #   # )
-  #   # lm_pred_logits = tf.matmul(lm_pred_tensor, bert_embedding_weight, transpose_b=True)
-  #   # lm_pred_logits = tf.nn.bias_add(lm_pred_logits, lm_pred_output_bias)
-  #   lm_pred_bias = Bias(units=bert_config.vocab_size)
-  #   lm_pred_logits = tf.matmul(lm_pred_tensor, bert_embedding_weight, transpose_b=True)
-  #   lm_pred_logits = lm_pred_bias(lm_pred_logits)  
-
-  #   lm_pred_log_probs = tf.nn.log_softmax(lm_pred_logits, axis=-1)
-
-  # Training Classification: Next Sentence Prediction
-  # Simple binary classification. Note that 0 is "next sentence" and 1 is
-  # "random sentence". This weight matrix is not used after pre-training.
-  # with tf.name_scope("cls/next_sentence_pred") as scope:
-  #   seq_rel_dense = tf.keras.layers.Dense(
-  #     units=2,
-  #     kernel_initializer=modeling.create_initializer(bert_config.initializer_range),
-  #   )
-  #   next_sentence_logits = seq_rel_dense(bert_pooled_output)
-
-  #   next_sentence_log_probs = tf.nn.log_softmax(next_sentence_logits, axis=-1)
-
-  # (masked_lm_loss,
-  #   masked_lm_example_loss, masked_lm_log_probs) = get_masked_lm_output(
-  #       bert_config, model.get_sequence_output(), model.get_embedding_table(),
-  #       masked_lm_positions, masked_lm_ids, masked_lm_weights)
-
-  # (next_sentence_loss, next_sentence_example_loss,
-  #   next_sentence_log_probs) = get_next_sentence_output(
-  #       bert_config, model.get_pooled_output(), next_sentence_labels)
-
-  # total_loss = next_sentence_loss
-
-  # #masked_lm_loss = tf.identity(masked_lm_loss, name='mlm_loss')
-  # next_sentence_loss = tf.identity(next_sentence_loss, name='nsp_loss')
-  # total_loss = tf.identity(total_loss, name='total_loss')
-
   training_model = tf.keras.Model(
     inputs = [input_ids, input_mask, segment_ids, masked_lm_positions, masked_lm_ids, masked_lm_weights, next_sentence_labels], 
     outputs = [masked_lm_log_probs, next_sentence_log_probs])
@@ -463,9 +323,68 @@ def get_pretraining_model(bert_config, params):
   # training_model.calced_loss = masked_lm_loss["loss"] + next_sentence_loss["loss"]
   # training_model.calced_metrics = {**masked_lm_metrics, **next_sentence_metrics}
 
+  total_loss = masked_lm_loss["loss"] + next_sentence_loss["loss"]
+
+  masked_lm_loss = tf.identity(masked_lm_loss["loss"], name='mlm_loss')
+  next_sentence_loss = tf.identity(next_sentence_loss["loss"], name='nsp_loss')
+  total_loss = tf.identity(total_loss, name='total_loss')
+
   return (training_model, 
-    masked_lm_loss["loss"] + next_sentence_loss["loss"], 
+    #masked_lm_loss["loss"] + next_sentence_loss["loss"], 
+    total_loss,
     {**masked_lm_metrics, **next_sentence_metrics})
+
+
+# class PretrainingModel(tf.keras.Model):
+#     """The pretraining BERT model"""
+#     def __init__(self,
+#                 bert_config,
+#                 embedding_weight,
+#                  **kwargs):
+#       self._bert_config = bert_config
+#       self._embedding_weight = embedding_weight
+#       super(PretrainingModel, self).__init__(**kwargs)
+
+#     def build(self, input_shape):
+#       self._bert = modeling.BertModel(config=self._bert_config)
+#       bert_embedding_weight = self._bert.get_embedding_table()
+
+#       self._pred_masked_lm = PredictMaskedLM(
+#                                       bert_config=self._bert_config,
+#                                       embedding_weight=bert_embedding_weight)
+#       self._pred_next_sentence = PredictNextSentence(bert_config=self._bert_config)
+
+#       super(PretrainingModel, self).build(input_shape)
+
+#     def call(self, input_ids, input_mask, segment_ids, 
+#         masked_lm_positions, masked_lm_ids, masked_lm_weights,
+#         next_sentence_labels):
+#       x = self._gather_indexes(bert_sequence_output, masked_lm_positions)
+#       x = self._nonlinear(x)
+#       x = self._layernorm(x)
+#       logits = tf.matmul(x, self._embedding_weight, transpose_b=True)
+#       logits = tf.nn.bias_add(logits, self._bias)
+#       log_probs = tf.nn.log_softmax(logits, axis=-1)
+#       return log_probs
+
+#     def get_loss(self, log_probs, masked_lm_positions, masked_lm_ids, masked_lm_weights):
+#       label_ids = tf.reshape(masked_lm_ids, [-1])
+#       label_weights = tf.reshape(masked_lm_weights, [-1])
+
+#       one_hot_labels = tf.one_hot(
+#           label_ids, depth=self._bert_config.vocab_size, dtype=tf.float32)
+
+#       # The `positions` tensor might be zero-padded (if the sequence is too
+#       # short to have the maximum number of predictions). The `label_weights`
+#       # tensor has a value of 1.0 for every real prediction and 0.0 for the
+#       # padding predictions.
+#       per_example_loss = -tf.reduce_sum(input_tensor=log_probs * one_hot_labels, axis=[-1])
+#       numerator = tf.reduce_sum(input_tensor=label_weights * per_example_loss)
+#       denominator = tf.reduce_sum(input_tensor=label_weights) + 1e-5
+#       loss = numerator / denominator
+
+#       return {"loss": loss, "per_example_loss": per_example_loss}
+
 
 
 class PredictMaskedLM(tf.keras.layers.Layer):
@@ -497,7 +416,7 @@ class PredictMaskedLM(tf.keras.layers.Layer):
 
     def call(self, bert_sequence_output, masked_lm_positions):
       # TODO: Make gather_indexes a member method
-      x = gather_indexes(bert_sequence_output, masked_lm_positions)
+      x = self._gather_indexes(bert_sequence_output, masked_lm_positions)
       x = self._nonlinear(x)
       x = self._layernorm(x)
       logits = tf.matmul(x, self._embedding_weight, transpose_b=True)
@@ -537,6 +456,21 @@ class PredictMaskedLM(tf.keras.layers.Layer):
       mean_loss.update_state(example_loss, label_weights)
 
       return {"masked_lm_accuracy": accuracy, "masked_lm_loss": mean_loss}
+
+    def _gather_indexes(self, sequence_tensor, positions):
+      """Gathers the vectors at the specific positions over a minibatch."""
+      sequence_shape = modeling.get_shape_list(sequence_tensor, expected_rank=3)
+      batch_size = sequence_shape[0]
+      seq_length = sequence_shape[1]
+      width = sequence_shape[2]
+
+      flat_offsets = tf.reshape(
+          tf.range(0, batch_size, dtype=tf.int32) * seq_length, [-1, 1])
+      flat_positions = tf.reshape(positions + flat_offsets, [-1])
+      flat_sequence_tensor = tf.reshape(sequence_tensor,
+                                        [batch_size * seq_length, width])
+      output_tensor = tf.gather(flat_sequence_tensor, flat_positions)
+      return output_tensor
 
 
 class PredictNextSentence(tf.keras.layers.Layer):
@@ -581,123 +515,6 @@ class PredictNextSentence(tf.keras.layers.Layer):
       mean_loss.update_state(example_loss)
 
       return {"next_sentense_accuracy": accuracy, "next_sentense_loss": mean_loss}
-
-
-def get_masked_lm_output(bert_config, input_tensor, output_weights, positions,
-                         label_ids, label_weights):
-  """Get loss and log probs for the masked LM."""
-  input_tensor = gather_indexes(input_tensor, positions)
-
-  with tf.name_scope("cls/masked_lm_pred") as scope:
-    im_pred_dense = tf.keras.layers.Dense(
-      units=bert_config.hidden_size,
-      activation=modeling.get_activation(bert_config.hidden_act),
-      kernel_initializer=modeling.create_initializer(bert_config.initializer_range),
-    )
-    input_tensor = im_pred_dense(input_tensor)
-    input_tensor = modeling.layer_norm(input_tensor)
-
-    output_bias = tf.Variable(
-      name="output_bias",
-      shape=[bert_config.vocab_size],
-      initial_value=tf.zeros([bert_config.vocab_size])
-    )
-    logits = tf.matmul(input_tensor, output_weights, transpose_b=True)
-    logits = tf.nn.bias_add(logits, output_bias)
-    log_probs = tf.nn.log_softmax(logits, axis=-1)
-
-    label_ids = tf.reshape(label_ids, [-1])
-    label_weights = tf.reshape(label_weights, [-1])
-
-    one_hot_labels = tf.one_hot(
-        label_ids, depth=bert_config.vocab_size, dtype=tf.float32)
-
-    # The `positions` tensor might be zero-padded (if the sequence is too
-    # short to have the maximum number of predictions). The `label_weights`
-    # tensor has a value of 1.0 for every real prediction and 0.0 for the
-    # padding predictions.
-    per_example_loss = -tf.reduce_sum(input_tensor=log_probs * one_hot_labels, axis=[-1])
-    numerator = tf.reduce_sum(input_tensor=label_weights * per_example_loss)
-    denominator = tf.reduce_sum(input_tensor=label_weights) + 1e-5
-    loss = numerator / denominator
-
-  return (loss, per_example_loss, log_probs)
-
-def get_masked_lm_output(bert_config, input_tensor, output_weights, positions,
-                         label_ids, label_weights):
-  """Get loss and log probs for the masked LM."""
-  input_tensor = gather_indexes(input_tensor, positions)
-
-  with tf.name_scope("cls/masked_lm_pred") as scope:
-    im_pred_dense = tf.keras.layers.Dense(
-      units=bert_config.hidden_size,
-      activation=modeling.get_activation(bert_config.hidden_act),
-      kernel_initializer=modeling.create_initializer(bert_config.initializer_range),
-    )
-    input_tensor = im_pred_dense(input_tensor)
-    input_tensor = modeling.layer_norm(input_tensor)
-
-    output_bias = tf.Variable(
-      name="output_bias",
-      shape=[bert_config.vocab_size],
-      initial_value=tf.zeros([bert_config.vocab_size])
-    )
-    logits = tf.matmul(input_tensor, output_weights, transpose_b=True)
-    logits = tf.nn.bias_add(logits, output_bias)
-    log_probs = tf.nn.log_softmax(logits, axis=-1)
-
-    label_ids = tf.reshape(label_ids, [-1])
-    label_weights = tf.reshape(label_weights, [-1])
-
-    one_hot_labels = tf.one_hot(
-        label_ids, depth=bert_config.vocab_size, dtype=tf.float32)
-
-    # The `positions` tensor might be zero-padded (if the sequence is too
-    # short to have the maximum number of predictions). The `label_weights`
-    # tensor has a value of 1.0 for every real prediction and 0.0 for the
-    # padding predictions.
-    per_example_loss = -tf.reduce_sum(input_tensor=log_probs * one_hot_labels, axis=[-1])
-    numerator = tf.reduce_sum(input_tensor=label_weights * per_example_loss)
-    denominator = tf.reduce_sum(input_tensor=label_weights) + 1e-5
-    loss = numerator / denominator
-
-  return (loss, per_example_loss, log_probs)
-
-
-def get_next_sentence_output(bert_config, input_tensor, labels):
-  """Get loss and log probs for the next sentence prediction."""
-
-  # Simple binary classification. Note that 0 is "next sentence" and 1 is
-  # "random sentence". This weight matrix is not used after pre-training.
-  with tf.name_scope("cls/next_sentence_pred") as scope:
-    seq_rel_dense = tf.keras.layers.Dense(
-      units=2,
-      kernel_initializer=modeling.create_initializer(bert_config.initializer_range),
-    )
-    logits = seq_rel_dense(input_tensor)
-
-    log_probs = tf.nn.log_softmax(logits, axis=-1)
-    labels = tf.reshape(labels, [-1])
-    one_hot_labels = tf.one_hot(labels, depth=2, dtype=tf.float32)
-    per_example_loss = -tf.reduce_sum(input_tensor=one_hot_labels * log_probs, axis=-1)
-    loss = tf.reduce_mean(input_tensor=per_example_loss)
-    return (loss, per_example_loss, log_probs)
-
-
-def gather_indexes(sequence_tensor, positions):
-  """Gathers the vectors at the specific positions over a minibatch."""
-  sequence_shape = modeling.get_shape_list(sequence_tensor, expected_rank=3)
-  batch_size = sequence_shape[0]
-  seq_length = sequence_shape[1]
-  width = sequence_shape[2]
-
-  flat_offsets = tf.reshape(
-      tf.range(0, batch_size, dtype=tf.int32) * seq_length, [-1, 1])
-  flat_positions = tf.reshape(positions + flat_offsets, [-1])
-  flat_sequence_tensor = tf.reshape(sequence_tensor,
-                                    [batch_size * seq_length, width])
-  output_tensor = tf.gather(flat_sequence_tensor, flat_positions)
-  return output_tensor
 
 
 def input_fn_builder(input_files,
