@@ -162,11 +162,30 @@ def model_fn_builder():
 
     ### Model ###
     bert_config = modeling.BertConfig.from_json_file(FLAGS.bert_config_file)
-    t_model = get_pretraining_model(bert_config, params)
-    [masked_lm_log_probs, next_sentence_log_probs] = t_model([input_ids, input_mask, segment_ids, masked_lm_positions])
 
-    # print(t_model.summary())
-    tvars = t_model.trainable_variables
+    training = (mode == tf.estimator.ModeKeys.TRAIN)
+    method = 1
+    if method == 0:
+      # This simply contruct the model here
+      (masked_lm_log_probs, next_sentence_log_probs) = pretrain_bert_fn(
+                                bert_config=bert_config, 
+                                input_ids=input_ids, 
+                                input_mask=input_mask, 
+                                segment_ids=segment_ids, 
+                                masked_lm_positions=masked_lm_positions,
+                                training=training)
+
+      tvars = tf.compat.v1.trainable_variables()
+    elif method == 1:
+      # This creates a Functional API trainging model
+      t_model = get_pretraining_model(bert_config, params, training=training)
+      [masked_lm_log_probs, next_sentence_log_probs] = t_model([input_ids, input_mask, segment_ids, masked_lm_positions])
+      tvars = t_model.trainable_variables
+    elif method == 2:
+      t_model = PretrainingBERT(bert_config=bert_config)
+      [masked_lm_log_probs, next_sentence_log_probs] = t_model([input_ids, input_mask, segment_ids, masked_lm_positions])
+      tvars = t_model.trainable_variables
+
     logging.info("**** Trainable Variables ****")
     for var in tvars:
       logging.info("  name = %s, shape = %s", var.name, var.shape)
@@ -197,8 +216,6 @@ def model_fn_builder():
     next_sentence_loss = tf.identity(next_sentence_loss["loss"], name='nsp_loss')
     total_loss = tf.identity(total_loss, name='total_loss')
 
-
-
     output_spec = None
     if mode == tf.estimator.ModeKeys.TRAIN:
       # train_op = optimization.create_optimizer(
@@ -227,7 +244,7 @@ def model_fn_builder():
   return model_fn
 
 
-def get_pretraining_model(bert_config, params):
+def get_pretraining_model(bert_config, params, training=None):
   """Build model for BERT pretraining"""
   max_seq_length = params["max_seq_length"]
   max_predictions_per_seq = params["max_predictions_per_seq"]
@@ -239,9 +256,26 @@ def get_pretraining_model(bert_config, params):
   segment_ids = tf.keras.Input(shape=(max_seq_length,), dtype=tf.int32, name="segment_ids")
   masked_lm_positions = tf.keras.Input(shape=(max_predictions_per_seq,), dtype=tf.int32, name="mlm_positions")
 
+  (masked_lm_log_probs, next_sentence_log_probs) = pretrain_bert_fn(
+                                  bert_config=bert_config, 
+                                  input_ids=input_ids, 
+                                  input_mask=input_mask, 
+                                  segment_ids=segment_ids, 
+                                  masked_lm_positions=masked_lm_positions,
+                                  training=training)
+
+  training_model = tf.keras.Model(
+    inputs=[input_ids, input_mask, segment_ids, masked_lm_positions],
+    outputs = [masked_lm_log_probs, next_sentence_log_probs])
+
+  return training_model
+
+
+def pretrain_bert_fn(bert_config, input_ids, input_mask, segment_ids, masked_lm_positions, training=None):
+  """Operations for BERT pretraining model"""
   # BERT model
   bert = modeling.BertModel(config=bert_config)
-  bert_pooled_output = bert([input_ids, input_mask, segment_ids])
+  bert_pooled_output = bert([input_ids, input_mask, segment_ids], training=training)
   bert_sequence_output = bert.get_sequence_output()
   bert_embedding_weight = bert.get_embedding_table()
 
@@ -257,11 +291,48 @@ def get_pretraining_model(bert_config, params):
   pred_next_sentence = PredictNextSentence(bert_config=bert_config)
   next_sentence_log_probs = pred_next_sentence(bert_pooled_output=bert_pooled_output)
 
-  training_model = tf.keras.Model(
-    inputs=[input_ids, input_mask, segment_ids, masked_lm_positions],
-    outputs = [masked_lm_log_probs, next_sentence_log_probs])
+  return (masked_lm_log_probs, next_sentence_log_probs)
 
-  return training_model
+
+class PretrainingBERT(tf.keras.Model):
+  """Pretraining Model for BERT """
+  def __init__(self,
+              bert_config,
+              **kwargs):
+    self._bert_config = bert_config
+    super(PretrainingBERT, self).__init__(**kwargs)
+
+  def build(self, input_shape):
+    logging.info("In PretrainingBERT build()")
+    self._bert = modeling.BertModel(config=self._bert_config)
+    bert_embedding_weight = self._bert.get_embedding_table()
+
+    self._pred_masked_lm = PredictMaskedLM(
+                                    bert_config=self._bert_config,
+                                    embedding_weight=bert_embedding_weight)
+
+    self._pred_next_sentence = PredictNextSentence(bert_config=self._bert_config)
+
+    super(PretrainingBERT, self).build(input_shape)
+
+  def call(self, inputs, training=None):
+    logging.info("In PretrainingBERT call()")
+    if (len(inputs) != 4):
+      raise ValueError("Input to BERT Pretraining model mismatch") 
+    input_ids = inputs[0]
+    input_mask = inputs[1]
+    segment_ids = inputs[2]
+    masked_lm_positions = inputs[3]
+    bert_pooled_output = self._bert([input_ids, input_mask, segment_ids], training=training)
+    bert_sequence_output = self._bert.get_sequence_output()
+  
+    masked_lm_log_probs = self._red_masked_lm(
+                                    bert_sequence_output=bert_sequence_output, 
+                                    masked_lm_positions=masked_lm_positions)
+
+    next_sentence_log_probs = self._pred_next_sentence(bert_pooled_output=bert_pooled_output)
+
+    return [masked_lm_log_probs, next_sentence_log_probs]
 
 
 class PredictMaskedLM(tf.keras.layers.Layer):
@@ -269,7 +340,7 @@ class PredictMaskedLM(tf.keras.layers.Layer):
     def __init__(self,
                 bert_config,
                 embedding_weight,
-                 **kwargs):
+                **kwargs):
       self._bert_config = bert_config
       self._embedding_weight = embedding_weight
       super(PredictMaskedLM, self).__init__(**kwargs)
