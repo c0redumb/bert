@@ -164,7 +164,7 @@ def model_fn_builder():
     bert_config = modeling.BertConfig.from_json_file(FLAGS.bert_config_file)
 
     training = (mode == tf.estimator.ModeKeys.TRAIN)
-    method = 1
+    method = 2
     if method == 0:
       # This simply contruct the model here
       (masked_lm_log_probs, next_sentence_log_probs) = pretrain_bert_fn(
@@ -182,8 +182,11 @@ def model_fn_builder():
       [masked_lm_log_probs, next_sentence_log_probs] = t_model([input_ids, input_mask, segment_ids, masked_lm_positions])
       tvars = t_model.trainable_variables
     elif method == 2:
+      # This creates a Keras Class API training model
       t_model = PretrainingBERT(bert_config=bert_config)
-      [masked_lm_log_probs, next_sentence_log_probs] = t_model([input_ids, input_mask, segment_ids, masked_lm_positions])
+      [masked_lm_log_probs, next_sentence_log_probs] = t_model(
+                          [input_ids, input_mask, segment_ids, masked_lm_positions],
+                          training=training)
       tvars = t_model.trainable_variables
 
     logging.info("**** Trainable Variables ****")
@@ -299,39 +302,23 @@ class PretrainingBERT(tf.keras.Model):
   def __init__(self,
               bert_config,
               **kwargs):
-    self._bert_config = bert_config
     super(PretrainingBERT, self).__init__(**kwargs)
-
-  def build(self, input_shape):
-    logging.info("In PretrainingBERT build()")
+    self._bert_config = bert_config
     self._bert = modeling.BertModel(config=self._bert_config)
     bert_embedding_weight = self._bert.get_embedding_table()
-
     self._pred_masked_lm = PredictMaskedLM(
-                                    bert_config=self._bert_config,
-                                    embedding_weight=bert_embedding_weight)
-
+                                  bert_config=self._bert_config,
+                                  embedding_weight=bert_embedding_weight)
     self._pred_next_sentence = PredictNextSentence(bert_config=self._bert_config)
 
-    super(PretrainingBERT, self).build(input_shape)
-
-  def call(self, inputs, training=None):
-    logging.info("In PretrainingBERT call()")
-    if (len(inputs) != 4):
-      raise ValueError("Input to BERT Pretraining model mismatch") 
-    input_ids = inputs[0]
-    input_mask = inputs[1]
-    segment_ids = inputs[2]
-    masked_lm_positions = inputs[3]
-    bert_pooled_output = self._bert([input_ids, input_mask, segment_ids], training=training)
+  def call(self, inputs,training=None):
+    # Input is [input_ids, input_mask, segment_ids, masked_lm_positions]
+    bert_pooled_output = self._bert(inputs[:3], training=training)
     bert_sequence_output = self._bert.get_sequence_output()
-  
-    masked_lm_log_probs = self._red_masked_lm(
-                                    bert_sequence_output=bert_sequence_output, 
-                                    masked_lm_positions=masked_lm_positions)
-
+    masked_lm_log_probs = self._pred_masked_lm(
+                                  bert_sequence_output=bert_sequence_output, 
+                                  masked_lm_positions=inputs[3])
     next_sentence_log_probs = self._pred_next_sentence(bert_pooled_output=bert_pooled_output)
-
     return [masked_lm_log_probs, next_sentence_log_probs]
 
 

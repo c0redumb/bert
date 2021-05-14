@@ -131,8 +131,6 @@ class BertModel(tf.keras.Model):
         """
         super(BertModel, self).__init__(**kwargs)
         self.config = config
-        # self.seq_length = seq_length
-        # self.batch_size = batch_size
 
         # Embedding Layer
         self._embedding_layer = Embedding(
@@ -144,6 +142,7 @@ class BertModel(tf.keras.Model):
             dropout_prob=config.hidden_dropout_prob,
             name="embedding_layer"
         )
+        self.embedding_table = self._embedding_layer.get_embedding_table()
 
         # Encoder Layers
         self._encoder_layers = [] 
@@ -188,8 +187,7 @@ class BertModel(tf.keras.Model):
 
         # Embedding
         self.embedding_output = self._embedding_layer(
-            input_ids, token_type_ids, training=training)
-        self.embedding_table = self._embedding_layer.get_embedding_table()
+            [input_ids, token_type_ids], training=training)
 
         # This converts a 2D mask of shape [batch_size, seq_length] to a 3D
         # mask of shape [batch_size, seq_length, seq_length] which is used
@@ -289,12 +287,16 @@ class Embedding(tf.keras.layers.Layer):
         self._init_range = init_range
         self._dropout_prob = dropout_prob
 
-    def build(self, input_shape):
+        # The embedding table is independent to input shape.
+        # It will need to be created early because it is shared
+        # and is needed for creation of other layers.
         self._word_embedding_table = self.add_weight(
             shape=[self._vocab_size, self._embedding_size],
             initializer=create_initializer(self._init_range),
             trainable=True,
             name="word_embedding")
+
+    def build(self, input_shape):
         self._token_type_table = self.add_weight(
             shape=[self._token_type_vocab_size, self._embedding_size],
             initializer=create_initializer(self._init_range),
@@ -323,7 +325,7 @@ class Embedding(tf.keras.layers.Layer):
             "dropout_prob": self._dropout_prob,
         }
 
-    def call(self, input_ids, token_type_ids, training=None):
+    def call(self, inputs, training=None):
         """Return outputs of the embedding
 
         Args:
@@ -335,6 +337,9 @@ class Embedding(tf.keras.layers.Layer):
           Output of the embedding for BERT
           tensor with shape [batch_size, seq_length, embedding_size]
         """
+        # inputs is [input_ids, token_type_ids].
+        input_ids = inputs[0]
+        token_type_ids = inputs[1]
 
         # Retrieve dynamically known shapes
         input_shape = get_shape_list(input_ids, expected_rank=2)
@@ -951,11 +956,11 @@ def create_initializer(initializer_range=0.02):
     return tf.keras.initializers.TruncatedNormal(stddev=initializer_range)
 
 
-def layer_norm(input_tensor, name=None):
-    """Run layer normalization on the last dimension of the tensor."""
-    # return tf.contrib.layers.layer_norm(
-    #     inputs=input_tensor, begin_norm_axis=-1, begin_params_axis=-1, scope=name)
-    return tf.keras.layers.LayerNormalization(axis=-1, epsilon=1e-12)(inputs=input_tensor)
+# def layer_norm(input_tensor, name=None):
+#     """Run layer normalization on the last dimension of the tensor."""
+#     # return tf.contrib.layers.layer_norm(
+#     #     inputs=input_tensor, begin_norm_axis=-1, begin_params_axis=-1, scope=name)
+#     return tf.keras.layers.LayerNormalization(axis=-1, epsilon=1e-12)(inputs=input_tensor)
 
 
 # def get_assignment_map_from_checkpoint(tvars, init_checkpoint):
